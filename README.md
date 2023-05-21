@@ -4,7 +4,7 @@ after git clone:
 cd os64/os64  
 cargo run  
 
-# any quesion  
+# any question  
 email to:  founder.os64@gmail.com  
 website:  http://os64.io/  
 
