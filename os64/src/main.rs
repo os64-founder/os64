@@ -18,9 +18,9 @@ extern crate alloc;
 
 // use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 // use os64::parallel::{executor::Executor, Task, keyboard};
-use bootloader::{BootInfo, entry_point};
+use bootloader::{BootInfo, entry_point, bootinfo};
 use x86_64::{VirtAddr, structures::paging::{Translate, Page}};
-use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}};
+use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{analysis_mousecode, mouse_buffer}};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -86,9 +86,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // new
     os64::memory::allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
-
+    
     os64::device::clock::real_time_clock::get_datetime();
     vga_test();
+
     // task_test();
     // print_l4_table(boot_info);
     // test_translate(boot_info);
@@ -103,7 +104,13 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     serial_println!("It did not crash!");
 
-    os64::hlt_loop();
+    loop {
+        if unsafe { mouse_buffer.count } > 0 {
+            analysis_mousecode();
+        }
+        x86_64::instructions::hlt();
+        // os64::hlt_loop();
+    }
 
 }
 

@@ -7,10 +7,13 @@ use core::{
     task::{Context, Poll},
 };
 
+pub mod apic;
 pub mod executor;
 pub mod keyboard;
 pub mod simple_executor;
 pub mod interrupts;
+pub mod mouse;
+pub mod ring_buffer;
 
 pub struct Task {
     id: TaskId,

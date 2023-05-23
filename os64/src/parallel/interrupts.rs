@@ -1,10 +1,24 @@
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame,PageFaultErrorCode};
-use crate::{global_descriptor_table, hlt_loop};
-use lazy_static::lazy_static;
+//                      ____________                          ____________
+// Real Time Clock --> |            |   Timer -------------> |            |
+// ACPI -------------> |            |   Keyboard-----------> |            |      _____
+// Available --------> | Secondary  |----------------------> | Primary    |     |     |
+// Available --------> | Interrupt  |   Serial Port 2 -----> | Interrupt  |---> | CPU |
+// Mouse ------------> | Controller |   Serial Port 1 -----> | Controller |     |_____|
+// Co-Processor -----> |            |   Parallel Port 2/3 -> |            |
+// Primary ATA ------> |            |   Floppy disk -------> |            |
+// Secondary ATA ----> |____________|   Parallel Port 1----> |____________|
+//
+
+use conquer_once::spin::Spin;
+use x86_64::{structures::idt::{InterruptDescriptorTable, InterruptStackFrame,PageFaultErrorCode}, instructions::port::PortReadOnly};
+use crate::{global_descriptor_table, hlt_loop, parallel::mouse};
+use lazy_static::{lazy_static, lazy::Lazy};
 use pic8259::ChainedPics;
-use spin;
+use spin::{self, Mutex};
 
 use crate::{serial_println, serial_print};
+
+use super::mouse::mouse_init;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -21,7 +35,9 @@ lazy_static! {
         }
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler); // new
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Mouse.as_usize()].set_handler_fn(mouse_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
+        mouse_init();
         idt
     };
 }
@@ -46,7 +62,14 @@ extern "x86-interrupt" fn double_fault_handler(
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
-    Keyboard, // new
+    Keyboard = PIC_1_OFFSET + 1,
+    // Serial0 = PIC_1_OFFSET + 3, 
+    // Serial1 = PIC_1_OFFSET + 4,
+    // Floppy = PIC_1_OFFSET + 6,
+    // Parallel = PIC_1_OFFSET + 7, 
+    Mouse = PIC_1_OFFSET + 12,
+    HardDisk0 = PIC_1_OFFSET + 14,
+    HardDisk1 = PIC_1_OFFSET + 15, 
 }
 
 impl InterruptIndex {
@@ -59,9 +82,7 @@ impl InterruptIndex {
     }
 }
 
-extern "x86-interrupt" fn timer_interrupt_handler(
-    _stack_frame: InterruptStackFrame)
-{
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     serial_print!(".");
     unsafe {
         PICS.lock()
@@ -69,9 +90,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(
     }
 }
 
-extern "x86-interrupt" fn keyboard_interrupt_handler(
-    _stack_frame: InterruptStackFrame)
-{
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
     use spin::Mutex;
     use x86_64::instructions::port::Port;
@@ -114,4 +133,24 @@ extern "x86-interrupt" fn page_fault_handler(
     serial_println!("Error Code: {:?}", error_code);
     serial_println!("{:#?}", stack_frame);
     hlt_loop();
+}
+
+lazy_static! {
+    static ref MOUSE: Mutex<u8> =
+        Mutex::new(0);
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
+    use spin::Mutex;
+    use x86_64::instructions::port::Port;
+
+    let mut mouse = MOUSE.lock();
+    // serial_print!("-");
+    mouse::mouse_handler();
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
+    }
 }

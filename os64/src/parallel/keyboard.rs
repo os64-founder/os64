@@ -1,14 +1,8 @@
 extern crate alloc;
 use conquer_once::spin::OnceCell;
-use core::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use core::{pin::Pin,task::{Context, Poll},};
 use crossbeam_queue::ArrayQueue;
-use futures_util::{
-    stream::{Stream, StreamExt},
-    task::AtomicWaker,
-};
+use futures_util::{stream::{Stream, StreamExt},task::AtomicWaker,};
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();

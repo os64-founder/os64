@@ -25,3 +25,11 @@ pub unsafe fn asm_clear_interrupt_flag() {
 pub unsafe fn asm_set_interrupt_flag() {
     asm!("sti");
 }
+
+// #[cfg(all(target_arch = "x86", target_os = "interix"))] 
+#[inline(always)] 
+pub fn asm_nop() {
+    unsafe { asm!("nop"); }
+}
+
+
