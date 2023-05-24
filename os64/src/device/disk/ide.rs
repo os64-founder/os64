@@ -351,49 +351,38 @@ pub struct DiskIdentifyInfo {
 // }
 
 
-use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte}, device::serial, serial_println, parallel::apic::*};
-
-// bitfield!{
-//     struct Date(MSB0 [u8]);
-//     u32;
-//     get_day, set_day: 4, 0;
-//     get_month, set_month: 8, 5;
-//     get_year, set_year: 23, 9;
-// }
-
-// fn main() {
-//     let mut date = Date([0, 0, 0]);
-
-//     date.set_day(7);
-//     date.set_month(1);
-//     date.set_year(2020);
-
-//     assert_eq!(date.get_day(), 7);
-//     assert_eq!(date.get_month(), 1);
-//     assert_eq!(date.get_year(), 2020);
-// }
+use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_insw}, device::serial, serial_println, parallel::apic::*, serial_print};
 
 pub fn disk_init() {
-	let mut entry = IO_APIC_RET_entry([
-        0x2f,
-        APIC_ICR_IOAPIC_FIXED,
-        ICR_IOAPIC_DELV_PHYSICAL,
-        APIC_ICR_IOAPIC_IDLE,
-        APIC_IOAPIC_POLARITY_HIGH,
-        APIC_IOAPIC_IRR_RESET,
-        APIC_ICR_IOAPIC_EDGE,
-        APIC_ICR_IOAPIC_MASKED,
-        0,
-        0,
-        0,
-    ]);
+    disk0_init();
+    // disk1_init();
+}
 
-	// register_irq(0x2f, &entry , &disk_handler, 0, &disk_int_controller, "disk1");
+pub fn disk0_init() {
+    unsafe {
+        asm_out_byte(PORT_DISK0_CONTROL,0);
+        // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0);
+	    while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
+	    serial_println!("Read One Sector Starting:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
 
+        asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        asm_out_byte(PORT_DISK0_ERROR,0);
+        asm_out_byte(PORT_DISK0_SECTOR_COUNT,1);
+        asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
+        asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
+        asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
+    	while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
+    	serial_println!("Send CMD:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+        //read
+        asm_out_byte(PORT_DISK0_STATUS_COMMAND,0x20);	
+    }
+}
+pub fn disk1_init() {
 	unsafe { 
         asm_out_byte(PORT_DISK1_CONTROL,0);
+        // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0);
 	    while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
-	    serial_println!("Read One Sector Starting:{}\n",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
+	    serial_println!("Read One Sector Starting:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
 
         asm_out_byte(PORT_DISK1_DEVICE,0xe0);
         asm_out_byte(PORT_DISK1_ERROR,0);
@@ -401,26 +390,24 @@ pub fn disk_init() {
         asm_out_byte(PORT_DISK1_SECTOR_NUMBER,0);
         asm_out_byte(PORT_DISK1_CYLINDER_LOW,0);
         asm_out_byte(PORT_DISK1_CYLINDER_HIGH,0);
-
     	while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
-    	serial_println!("Send CMD:{}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
+    	serial_println!("Send CMD:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
         //read
         asm_out_byte(PORT_DISK1_STATUS_COMMAND,0x20);	
     };
-	
 }
 
-pub fn disk_exit() {
-	// unregister_irq(0x2f);
-}
+const DISK_DATA_PORT : [u16; 2] = [PORT_DISK0_DATA,PORT_DISK1_DATA]; 
 
-pub fn disk_handler(nr : u64, parameter : u64, regs : pt_regs) {
-	// let int i = 0;
-	// unsigned char a[512];
-	// port_insw(PORT_DISK1_DATA,&a,256);
-	// color_printk(ORANGE,WHITE,"Read One Sector Finished:%02x\n",io_in8(PORT_DISK1_STATUS_CMD));
-	// for(i = 0;i<512;i++)
-	// 	color_printk(ORANGE,WHITE,"%02x ",a[i]);
+pub fn disk_handler(disk_index : usize) {
+    let mut buffer : [u16; 256] = [0; 256];
+    unsafe{
+        asm_insw(DISK_DATA_PORT[disk_index],buffer.as_mut_ptr(),256);
+        serial_println!("Read One Sector Finished:{}", asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+    }
+    for i in buffer {
+        serial_print!("{:04x} ",i);
+    }
 }
 
 // fn read_sectors(&mut self, count: u32, start_sector: u32) {

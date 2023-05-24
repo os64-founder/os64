@@ -9,9 +9,8 @@
 // Secondary ATA ----> |____________|   Parallel Port 1----> |____________|
 //
 
-use conquer_once::spin::Spin;
-use x86_64::{structures::idt::{InterruptDescriptorTable, InterruptStackFrame,PageFaultErrorCode}, instructions::port::PortReadOnly};
-use crate::{global_descriptor_table, hlt_loop, parallel::mouse};
+use x86_64::{structures::idt::{InterruptDescriptorTable, InterruptStackFrame,PageFaultErrorCode}};
+use crate::{hlt_loop, parallel::mouse, device::disk::ide::disk_handler};
 use lazy_static::{lazy_static, lazy::Lazy};
 use pic8259::ChainedPics;
 use spin::{self, Mutex};
@@ -36,6 +35,10 @@ lazy_static! {
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler); // new
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
         idt[InterruptIndex::Mouse.as_usize()].set_handler_fn(mouse_interrupt_handler);
+        idt[InterruptIndex::Serial0.as_usize()].set_handler_fn(serial0_interrupt_handler);
+        idt[InterruptIndex::Serial1.as_usize()].set_handler_fn(serial1_interrupt_handler);
+        idt[InterruptIndex::HardDisk0.as_usize()].set_handler_fn(disk0_interrupt_handler);
+        idt[InterruptIndex::HardDisk1.as_usize()].set_handler_fn(disk1_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         mouse_init();
         idt
@@ -63,10 +66,10 @@ extern "x86-interrupt" fn double_fault_handler(
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard = PIC_1_OFFSET + 1,
-    // Serial0 = PIC_1_OFFSET + 3, 
-    // Serial1 = PIC_1_OFFSET + 4,
-    // Floppy = PIC_1_OFFSET + 6,
-    // Parallel = PIC_1_OFFSET + 7, 
+    Serial0 = PIC_1_OFFSET + 3, 
+    Serial1 = PIC_1_OFFSET + 4,
+    Floppy = PIC_1_OFFSET + 6,
+    Parallel = PIC_1_OFFSET + 7, 
     Mouse = PIC_1_OFFSET + 12,
     HardDisk0 = PIC_1_OFFSET + 14,
     HardDisk1 = PIC_1_OFFSET + 15, 
@@ -152,5 +155,41 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
+    }
+}
+
+const PORT_DISK0_DATA            : u16 = 0x1F0;  //数据寄存器端口
+const PORT_DISK1_DATA            : u16 = 0x170;  //数据寄存器端口
+const PORT_DISK0_STATUS_COMMAND  : u16 = 0x1F7;  //命令寄存器端口,和状态寄存器共用
+const PORT_DISK1_STATUS_COMMAND  : u16 = 0x177;  //命令寄存器端口,和状态寄存器共用
+
+extern "x86-interrupt" fn disk0_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    disk_handler(0);
+	unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+    }
+
+}
+extern "x86-interrupt" fn disk1_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    disk_handler(1);
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn serial0_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    serial_print!("---serial0---");
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+    }
+}
+extern "x86-interrupt" fn serial1_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    serial_print!("---serial1---");
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
     }
 }

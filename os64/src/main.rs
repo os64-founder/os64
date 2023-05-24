@@ -20,7 +20,7 @@ extern crate alloc;
 // use os64::parallel::{executor::Executor, Task, keyboard};
 use bootloader::{BootInfo, entry_point, bootinfo};
 use x86_64::{VirtAddr, structures::paging::{Translate, Page}};
-use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{analysis_mousecode, mouse_buffer}};
+use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, disk::ide::disk_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{analysis_mousecode, mouse_buffer}};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -86,8 +86,11 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // new
     os64::memory::allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
-    
+
     os64::device::clock::real_time_clock::get_datetime();
+
+    disk_init();
+
     vga_test();
 
     // task_test();
