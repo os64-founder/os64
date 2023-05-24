@@ -1,6 +1,6 @@
 # run OS64 v0.0.1  
-Install rust and qemu,  
-after git clone:  
+Install rust(https://www.rust-lang.org/) and qemu(https://www.qemu.org/),  
+git clone https://github.com/os64-founder/os64.git
 cd os64/os64  
 cargo run  
 
