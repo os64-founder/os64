@@ -366,7 +366,7 @@ pub fn disk0_init() {
 	    // while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
 	    // serial_println!("Read One Sector Starting:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
 
-        // asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        // asm_out_byte(PORT_DISK0_DEVICE,0xf0);
         // asm_out_byte(PORT_DISK0_ERROR,0);
         // asm_out_byte(PORT_DISK0_SECTOR_COUNT,1);
         // asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
@@ -383,10 +383,11 @@ pub fn disk0_init() {
         asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
         asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
         asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
-        asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        asm_out_byte(PORT_DISK0_DEVICE,0xf0);
         asm_out_byte(PORT_DISK0_STATUS_COMMAND,0xec);
     }
 }
+
 pub fn disk1_init() {
 	unsafe { 
         // asm_out_byte(PORT_DISK1_CONTROL,0);
@@ -443,30 +444,3 @@ pub fn disk_handler(disk_index : usize) {
     //     serial_print!("{:08x} ",i);
     // }
 }
-
-// fn read_sectors(&mut self, count: u32, start_sector: u32) {
-//     //等待设备准备好
-//     self.wait_ready();
-    
-//     //写入扇区数和起始扇区号
-//     unsafe {
-//         port_write(PORT_SECTOR_COUNT, count as u16);
-//         port_write(PORT_SECTOR_NUMBER, start_sector as u16);
-//     }
-    
-//     //发送读扇区命令
-//     unsafe { port_write(PORT_COMMAND, 0x20) };  
-
-//     //读取数据和状态
-//     let mut buf = vec![0; 512 * count as usize];
-//     self.read_buffer(buf.as_mut_slice());
-//     let status = unsafe { port_read(PORT_STATUS) };
-// }
-
-// unsafe fn port_read(port: u16) -> u8 {
-//     *((port as u32) as *mut u8)
-// } 
-
-// unsafe fn port_write(port: u16, data: u8) {
-//     *((port as u32) as *mut u8) = data;
-// }
