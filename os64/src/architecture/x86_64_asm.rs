@@ -34,12 +34,25 @@ pub fn asm_nop() {
 
 pub unsafe fn asm_insw(port : u16,buffer : *mut u16, nr : usize){
     asm!(
-        "cld",        // 清方向标志,用于字符串操作
-        "rep insw",   // 重复输入 nr 个字到 es:di
-        "mfence",   //内存屏障,等待所有之前的内存访问完成
-        in("dx") port, // port 寄存器
-        in("di") buffer, // es:di,目标缓冲区
-        in("cx") nr,   // cx,重复次数     
+        "cld",          // 清方向标志,用于字符串操作
+        "rep insw",     // 重复输入 nr 个字到 es:di
+        "mfence",       //内存屏障,等待所有之前的内存访问完成
+        in("dx") port,  // port 寄存器
+        in("di") buffer,// es:di,目标缓冲区
+        in("cx") nr,    // cx,重复次数     
+        // out("memory") _, // 避免破坏任何寄存器
+        options(nostack, preserves_flags)
+    );
+}
+
+pub unsafe fn asm_insd(port : u16, buffer : *mut u32, nr : usize){
+    asm!(
+        "cld",          // 清方向标志,用于字符串操作
+        "rep insd",     // 重复输入 nr 个字到 es:di
+        "mfence",       //内存屏障,等待所有之前的内存访问完成
+        in("dx") port,  // port 寄存器
+        in("di") buffer,// es:di,目标缓冲区
+        in("cx") nr,    // cx,重复次数     
         // out("memory") _, // 避免破坏任何寄存器
         options(nostack, preserves_flags)
     );

@@ -28,6 +28,7 @@ const DISK_STATUS_REQ           : u8 = 1<<3;    //命令寄存器端口,和状�
 const DISK_STATUS_ERROR         : u8 = 1<<0;    //命令寄存器端口,和状态寄存器共用
 
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct DiskIdentifyInfo {
     ///  0   General configuration bit-significant information
     pub general_config: u16,
@@ -54,7 +55,7 @@ pub struct DiskIdentifyInfo {
     pub retired1: u16,
 
     ///  10-19   Serial number (20 ASCII characters)
-    pub serial_number: [u16; 10],
+    pub serial_number: [u8; 20],
     
     ///  20-21   Retired
     pub retired2: [u16; 2],
@@ -63,10 +64,10 @@ pub struct DiskIdentifyInfo {
     pub obsolete3: u16,
 
     ///  23-26   Firmware revision(8 ASCII characters) 
-    pub firmware_version: [u16; 4],
+    pub firmware_version: [u8; 8],
 
     ///  27-46   Model number (40 ASCII characters)
-    pub model_number: [u16; 20],
+    pub model_number: [u8; 40],
     
 	///	47	15:8 	80h 
 	///		7:0  	00h=Reserved 
@@ -351,7 +352,7 @@ pub struct DiskIdentifyInfo {
 // }
 
 
-use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_insw}, device::serial, serial_println, parallel::apic::*, serial_print};
+use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_insw, asm_insd}, device::serial, serial_println, parallel::apic::*, serial_print};
 
 pub fn disk_init() {
     disk0_init();
@@ -360,54 +361,87 @@ pub fn disk_init() {
 
 pub fn disk0_init() {
     unsafe {
-        asm_out_byte(PORT_DISK0_CONTROL,0);
-        // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0);
-	    while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
-	    serial_println!("Read One Sector Starting:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+        // asm_out_byte(PORT_DISK0_CONTROL,0);
+        // // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0);
+	    // while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
+	    // serial_println!("Read One Sector Starting:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
 
-        asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        // asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        // asm_out_byte(PORT_DISK0_ERROR,0);
+        // asm_out_byte(PORT_DISK0_SECTOR_COUNT,1);
+        // asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
+        // asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
+        // asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
+    	// while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
+    	// serial_println!("Send CMD:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+        // //read
+        // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0x20);	
+
+        asm_out_byte(PORT_DISK0_CONTROL,0);
         asm_out_byte(PORT_DISK0_ERROR,0);
-        asm_out_byte(PORT_DISK0_SECTOR_COUNT,1);
+        asm_out_byte(PORT_DISK0_SECTOR_COUNT,0);
         asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
         asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
         asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
-    	while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
-    	serial_println!("Send CMD:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
-        //read
-        asm_out_byte(PORT_DISK0_STATUS_COMMAND,0x20);	
+        asm_out_byte(PORT_DISK0_DEVICE,0xe0);
+        asm_out_byte(PORT_DISK0_STATUS_COMMAND,0xec);
     }
 }
 pub fn disk1_init() {
 	unsafe { 
-        asm_out_byte(PORT_DISK1_CONTROL,0);
-        // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0);
-	    while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
-	    serial_println!("Read One Sector Starting:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
+        // asm_out_byte(PORT_DISK1_CONTROL,0);
+        // // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0);
+	    // while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
+	    // serial_println!("Read One Sector Starting:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
 
-        asm_out_byte(PORT_DISK1_DEVICE,0xe0);
+        // asm_out_byte(PORT_DISK1_DEVICE,0xe0);
+        // asm_out_byte(PORT_DISK1_ERROR,0);
+        // asm_out_byte(PORT_DISK1_SECTOR_COUNT,1);
+        // asm_out_byte(PORT_DISK1_SECTOR_NUMBER,0);
+        // asm_out_byte(PORT_DISK1_CYLINDER_LOW,0);
+        // asm_out_byte(PORT_DISK1_CYLINDER_HIGH,0);
+    	// while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
+    	// serial_println!("Send CMD:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
+        // //read
+        // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0x20);	
+
+        asm_out_byte(PORT_DISK1_CONTROL,0);
         asm_out_byte(PORT_DISK1_ERROR,0);
-        asm_out_byte(PORT_DISK1_SECTOR_COUNT,1);
+        asm_out_byte(PORT_DISK1_SECTOR_COUNT,0);
         asm_out_byte(PORT_DISK1_SECTOR_NUMBER,0);
         asm_out_byte(PORT_DISK1_CYLINDER_LOW,0);
         asm_out_byte(PORT_DISK1_CYLINDER_HIGH,0);
-    	while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
-    	serial_println!("Send CMD:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
-        //read
-        asm_out_byte(PORT_DISK1_STATUS_COMMAND,0x20);	
+        asm_out_byte(PORT_DISK1_DEVICE,0xe0);
+        asm_out_byte(PORT_DISK1_STATUS_COMMAND,0xec);
     };
 }
 
 const DISK_DATA_PORT : [u16; 2] = [PORT_DISK0_DATA,PORT_DISK1_DATA]; 
 
+pub fn print_u8_arrays(title : &str, string : *const u8, size : isize ) {
+    serial_print!("{}",title);
+    unsafe {
+        for i in 0..size {
+            serial_print!("{}",*(string.offset(i)) as char);
+        }
+    }
+    serial_print!("\n");
+}
+
 pub fn disk_handler(disk_index : usize) {
-    let mut buffer : [u16; 256] = [0; 256];
+    let mut buffer : [u32; 128] = [0; 128];
     unsafe{
-        asm_insw(DISK_DATA_PORT[disk_index],buffer.as_mut_ptr(),256);
+        asm_insd(DISK_DATA_PORT[disk_index],buffer.as_mut_ptr(),128);
         serial_println!("Read One Sector Finished:{}", asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+        let disk_info = *(buffer.as_mut_ptr() as *mut DiskIdentifyInfo);
+        serial_println!("{:?}", disk_info);
+        print_u8_arrays("serial_number = ",disk_info.serial_number.as_ptr(),20);
+        print_u8_arrays("firmware_version = ",disk_info.firmware_version.as_ptr(),8);
+        print_u8_arrays("model_number = ",disk_info.model_number.as_ptr(),40);
     }
-    for i in buffer {
-        serial_print!("{:04x} ",i);
-    }
+    // for i in buffer {
+    //     serial_print!("{:08x} ",i);
+    // }
 }
 
 // fn read_sectors(&mut self, count: u32, start_sector: u32) {

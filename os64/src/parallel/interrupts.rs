@@ -167,9 +167,8 @@ extern "x86-interrupt" fn disk0_interrupt_handler(_stack_frame: InterruptStackFr
     disk_handler(0);
 	unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::HardDisk0.as_u8());
     }
-
 }
 extern "x86-interrupt" fn disk1_interrupt_handler(_stack_frame: InterruptStackFrame) {
     disk_handler(1);
@@ -183,13 +182,13 @@ extern "x86-interrupt" fn serial0_interrupt_handler(_stack_frame: InterruptStack
     serial_print!("---serial0---");
     unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::Serial0.as_u8());
     }
 }
 extern "x86-interrupt" fn serial1_interrupt_handler(_stack_frame: InterruptStackFrame) {
     serial_print!("---serial1---");
     unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::Serial1.as_u8());
     }
 }
