@@ -1,21 +1,19 @@
-use num_traits::Zero;
-
 pub const RING_BUFFER_SIZE : u32 = 240;
 
-pub struct RingBuffer<T> {
+pub struct RingBuffer<T : Default + Copy> {
     pub count: u32,
     pub head: u32,
     pub tail: u32,
     pub buffer: [T; RING_BUFFER_SIZE as usize],
 }
 
-impl<T : Zero + Copy> RingBuffer<T> {
+impl<T : Default + Copy> RingBuffer<T> {
     pub fn new() -> Self {
         Self {
             count: 0, 
             head: 0,
             tail: 0, 
-            buffer: [T::zero(); RING_BUFFER_SIZE as usize],
+            buffer: [T::default(); RING_BUFFER_SIZE as usize],
         }
     }
 

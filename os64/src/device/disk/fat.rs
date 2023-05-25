@@ -1,10 +1,10 @@
-// 本文试图实现 FAT12/16/32 ，以下词：
+// 本文试图实现 FAT12/16/32
 // FAT：文件分配表(File Allocation Table)
 // 链表结构：文件中的数据块，FAT 用 链表结构 表示
 // 支持对磁盘空间的划分管理,如簇(Cluster)的概念
-// FAT12:常用于软盘，720K / 1.44M / 2.88M ； FAT16:<2GB； FAT32:<2TB （未考究）
-// 文件大小上限不同: FAT12:<4MB, FAT16:<2GB, FAT32:<4GB。（未考究）
-// 簇大小不同: FAT12:1KB、2KB, FAT16:16KB~64KB, FAT32:4KB~32KB。（未考究）
+// FAT12:常用于软盘，720K / 1.44M / 2.88M ； FAT16:<2GB； FAT32:<2TB 
+// 文件大小上限不同: FAT12:<4MB, FAT16:<2GB, FAT32:<4GB。
+// 簇大小不同: FAT12:0.5~2KB, FAT16:16KB~64KB, FAT32:4KB~32KB。
 // 文件分配表大小不同: FAT12:12比特, FAT16:16比特, FAT32:32比特。
 // FAT12:早期DOS, FAT16:DOS/Windows, FAT32:Windows98及以上。
 
@@ -232,89 +232,86 @@ impl From<u16> for Time {
 pub struct Fat32;
 
 impl File_System for Fat32 {
-    fn get_name() -> &'static str { return "FAT32"; }
+    // fn get_name() -> &'static str { return "FAT32"; }
 
-    fn get_sign() -> u16 {
-        //FAT32
-        return 0x400B;
-        //FAT16
-        // return 0x4006;
+    // fn get_sign() -> u16 {
+    //     //FAT32
+    //     return 0x400B;
+    //     //FAT16
+    //     // return 0x4006;
+    // }
+
+    fn block_write(block : &SuperBlock) {
     }
 
-    fn block_write(block : &Block) {
-        todo!()
+    fn block_put(block : &SuperBlock) {
     }
 
-    fn block_put(block : &Block) {
-        todo!()
+    fn node_write(node :&IndexNode) {
     }
 
-    fn node_write(node :&Node) {
-        todo!()
+    fn node_create(node :&IndexNode, dir : &Directory, mode : u64) -> u64 {
+        0
     }
 
-    fn node_create(node :&Node, dir : &Directory, mode : u64) -> u64 {
-        todo!()
+    fn directory_make(node :&IndexNode, dir : &Directory, mode : u64) -> u64 {
+        0
     }
 
-    fn directory_make(node :&Node, dir : &Directory, mode : u64) -> u64 {
-        todo!()
+    fn directory_remove(node :&IndexNode, dir : &Directory) -> u64 {
+        0
     }
 
-    fn directory_remove(node :&Node, dir : &Directory) -> u64 {
-        todo!()
-    }
-
-    fn directory_rename(old_node :&Node, old_dir : &Directory, new_node : &Node, new_dir : &Directory) -> u64 {
-        todo!()
+    fn directory_rename(old_node :&IndexNode, old_dir : &Directory, new_node : &IndexNode, new_dir : &Directory) -> u64 {
+        0
     }
 
     fn directory_get_attributes(dir : &Directory) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
     fn directory_set_attributes(dir : &Directory, attributes : u64) -> Result<(), &'static str> {
-        todo!()
+        Ok(())
     }
 
     fn directory_compare(dir : &Directory, source_filename : &'static str, destination_filename : &'static str) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
     fn directory_hash(dir : &Directory, filename : &'static str) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
     fn directory_release(dir : &Directory) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
-    fn directory_iput(dir : &Directory, node : &Node) -> Result<u64, &'static str> {
-        todo!()
+    fn directory_iput(dir : &Directory, node : &IndexNode) -> Result<u64, &'static str> {
+        Ok(0)
     }
 
-    fn file_open(file : &File, node : &Node) -> Result<(), &'static str> {
-        todo!()
+    fn file_open(file : &File, node : &IndexNode) -> Result<(), &'static str> {
+        Ok(())
     }
 
-    fn file_close(file : &File, node : &Node) -> Result<(), &'static str> {
-        todo!()
+    fn file_close(file : &File, node : &IndexNode) -> Result<(), &'static str> {
+        Ok(())
     }
 
     fn file_read(file : &File, buffer : *mut u8, size : usize, position : usize) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
     fn file_write(file : &File, buffer : *mut u8, size : usize, position : usize) -> Result<u64, &'static str> {
-        todo!()
+        Ok(0)
     }
 
-    fn file_seek(file : &File, offset : usize, origin : u8) {
-        todo!()
+    fn file_seek(file : &File, offset : usize, origin : u8) -> Result<u64, &'static str> {
+        Ok(0)
     }
 
-    fn io_control(file : &File, node : &Node, command : u64, argment : u64) -> Result<u64, &'static str> {
-        todo!()
+    fn io_control(file : &File, node : &IndexNode, command : u64, argment : u64) -> Result<u64, &'static str> {
+        Ok(0)
     }
 
 }

@@ -20,7 +20,7 @@ extern crate alloc;
 // use os64::parallel::{executor::Executor, Task, keyboard};
 use bootloader::{BootInfo, entry_point, bootinfo};
 use x86_64::{VirtAddr, structures::paging::{Translate, Page}};
-use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, disk::ide::disk_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{analysis_mousecode, mouse_buffer}};
+use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, devices_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{self}};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -73,9 +73,16 @@ entry_point!(kernel_main);
 //pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     serial_println!("os64 start ...");
-    serial_println!("Hello World{}", "!");
+    // serial_println!("Hello World !");
 
     os64::init(); // new
+
+    // mouse::mouse_init();
+    // let result = mouse::init(on_mouse_action);
+    // match result {
+    //     Ok(_) => serial_println!("mouse::init OK "),
+    //     Err(msg) => serial_println!("mouse::init Error : {} ", msg),
+    // }
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
@@ -89,7 +96,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     os64::device::clock::real_time_clock::get_datetime();
 
-    disk_init();
+    devices_init();
 
     vga_test();
 
@@ -108,9 +115,6 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     serial_println!("It did not crash!");
 
     loop {
-        if unsafe { mouse_buffer.count } > 0 {
-            analysis_mousecode();
-        }
         x86_64::instructions::hlt();
         // os64::hlt_loop();
     }

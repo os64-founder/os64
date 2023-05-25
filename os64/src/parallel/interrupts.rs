@@ -10,14 +10,12 @@
 //
 
 use x86_64::{structures::idt::{InterruptDescriptorTable, InterruptStackFrame,PageFaultErrorCode}};
-use crate::{hlt_loop, parallel::mouse, device::disk::ide::disk_handler};
-use lazy_static::{lazy_static, lazy::Lazy};
+use crate::{hlt_loop, parallel::mouse::{self, on_mouse_action}, device::disk::ide::ide_handler};
+use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::{self, Mutex};
 
 use crate::{serial_println, serial_print};
-
-use super::mouse::mouse_init;
 
 pub const PIC_1_OFFSET: u8 = 32;
 pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -37,10 +35,10 @@ lazy_static! {
         idt[InterruptIndex::Mouse.as_usize()].set_handler_fn(mouse_interrupt_handler);
         idt[InterruptIndex::Serial0.as_usize()].set_handler_fn(serial0_interrupt_handler);
         idt[InterruptIndex::Serial1.as_usize()].set_handler_fn(serial1_interrupt_handler);
-        idt[InterruptIndex::HardDisk0.as_usize()].set_handler_fn(disk0_interrupt_handler);
-        idt[InterruptIndex::HardDisk1.as_usize()].set_handler_fn(disk1_interrupt_handler);
+        idt[InterruptIndex::IDE0.as_usize()].set_handler_fn(ide0_interrupt_handler);
+        idt[InterruptIndex::IDE1.as_usize()].set_handler_fn(ide1_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
-        mouse_init();
+        mouse::init(on_mouse_action);
         idt
     };
 }
@@ -71,8 +69,8 @@ pub enum InterruptIndex {
     Floppy = PIC_1_OFFSET + 6,
     Parallel = PIC_1_OFFSET + 7, 
     Mouse = PIC_1_OFFSET + 12,
-    HardDisk0 = PIC_1_OFFSET + 14,
-    HardDisk1 = PIC_1_OFFSET + 15, 
+    IDE0 = PIC_1_OFFSET + 14,
+    IDE1 = PIC_1_OFFSET + 15, 
 }
 
 impl InterruptIndex {
@@ -150,7 +148,7 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
 
     let mut mouse = MOUSE.lock();
     // serial_print!("-");
-    mouse::mouse_handler();
+    mouse::mouse_handler();    
 
     unsafe {
         PICS.lock()
@@ -158,23 +156,19 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     }
 }
 
-const PORT_DISK0_DATA            : u16 = 0x1F0;  //数据寄存器端口
-const PORT_DISK1_DATA            : u16 = 0x170;  //数据寄存器端口
-const PORT_DISK0_STATUS_COMMAND  : u16 = 0x1F7;  //命令寄存器端口,和状态寄存器共用
-const PORT_DISK1_STATUS_COMMAND  : u16 = 0x177;  //命令寄存器端口,和状态寄存器共用
-
-extern "x86-interrupt" fn disk0_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    disk_handler(0);
+extern "x86-interrupt" fn ide0_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    ide_handler(0);
 	unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::HardDisk0.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::IDE0.as_u8());
     }
 }
-extern "x86-interrupt" fn disk1_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    disk_handler(1);
+
+extern "x86-interrupt" fn ide1_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    ide_handler(1);
     unsafe {
         PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::HardDisk1.as_u8());
+            .notify_end_of_interrupt(InterruptIndex::IDE1.as_u8());
     }
 }
 
@@ -185,6 +179,7 @@ extern "x86-interrupt" fn serial0_interrupt_handler(_stack_frame: InterruptStack
             .notify_end_of_interrupt(InterruptIndex::Serial0.as_u8());
     }
 }
+
 extern "x86-interrupt" fn serial1_interrupt_handler(_stack_frame: InterruptStackFrame) {
     serial_print!("---serial1---");
     unsafe {

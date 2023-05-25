@@ -1,31 +1,80 @@
-//IDE ATA 
+use alloc::rc::Rc;
+//本文实现了DMA方式进行硬盘数据的读写
+//本文用到了如下单词缩写：
+//ISA: Industry Standard Architecture,工业标准体系结构。
+//IDE: Integrated Drive Electronics,集成驱动器电子装置。IDE接口的硬盘，通过IDE线，连接到电脑。
+//ATA: Advanced Technology Attachment,高级技术附件。
+//DMA: Direct Memory Access,直接内存访问。
+use bitflags::bitflags;
+use lazy_static::lazy_static;
+use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_in_u32, asm_out_u32}, serial_println, serial_print};
 
-const PORT_DISK0_DATA            : u16 = 0x1F0;  //数据寄存器端口
-const PORT_DISK0_ERROR           : u16 = 0x1F1;  //错误寄存器端口 
-const PORT_DISK0_SECTOR_COUNT    : u16 = 0x1F2;  //扇区计数寄存器端口
-const PORT_DISK0_SECTOR_NUMBER   : u16 = 0x1F3;  //扇区号寄存器端口
-const PORT_DISK0_CYLINDER_LOW    : u16 = 0x1F4;  //柱面低字节寄存器端口
-const PORT_DISK0_CYLINDER_HIGH   : u16 = 0x1F5;  //柱面高字节寄存器端口
-const PORT_DISK0_DEVICE          : u16 = 0x1F6;  //设备/磁头寄存器端口
-const PORT_DISK0_STATUS_COMMAND  : u16 = 0x1F7;  //命令寄存器端口,和状态寄存器共用
+const SECTOR_SIZE : usize = 128;
+// const MAX_DMA_SECTORS: usize = 0x1F_F000 / SECTOR_SIZE;
 
-const PORT_DISK1_DATA            : u16 = 0x170;  //数据寄存器端口
-const PORT_DISK1_ERROR           : u16 = 0x171;  //错误寄存器端口 
-const PORT_DISK1_SECTOR_COUNT    : u16 = 0x172;  //扇区计数寄存器端口
-const PORT_DISK1_SECTOR_NUMBER   : u16 = 0x173;  //扇区号寄存器端口
-const PORT_DISK1_CYLINDER_LOW    : u16 = 0x174;  //柱面低字节寄存器端口
-const PORT_DISK1_CYLINDER_HIGH   : u16 = 0x175;  //柱面高字节寄存器端口
-const PORT_DISK1_DEVICE          : u16 = 0x176;  //设备/磁头寄存器端口
-const PORT_DISK1_STATUS_COMMAND  : u16 = 0x177;  //命令寄存器端口,和状态寄存器共用
+const IDE_COMMAND_READ      : u8 = 0x20;
+const IDE_COMMAND_WRITE     : u8 = 0x30;
+const IDE_COMMAND_IDENTIFY  : u8 = 0xEC;
 
-const PORT_DISK0_CONTROL         : u16 = 0x3F6;  //命令控制端口
-const PORT_DISK1_CONTROL         : u16 = 0x376;  //命令控制端口
+const ISA_DATA              : u16 = 0x00;   //数据寄存器端口 
+const ISA_ERROR             : u16 = 0x01;   //错误寄存器端口 
+const ISA_SECTOR_COUNT      : u16 = 0x02;   //扇区计数寄存器端口
+const ISA_SECTOR_INDEX      : u16 = 0x03;   //扇区号寄存器端口
+const ISA_CYLINDER_LOW      : u16 = 0x04;   //柱面低字节寄存器端口   
+const ISA_CYLINDER_HIGH     : u16 = 0x05;   //柱面高字节寄存器端口
+const ISA_DEVICE            : u16 = 0x06;   //设备及磁头寄存器端口（各4位?）
+const ISA_COMMAND           : u16 = 0x07;   //命令寄存器端口,和状态寄存器共用
+const ISA_STATUS            : u16 = 0x07;   //状态寄存器端口
 
-const DISK_STATUS_BUSY          : u8 = 1<<7;    //命令寄存器端口,和状态寄存器共用
-const DISK_STATUS_READY         : u8 = 1<<6;    //命令寄存器端口,和状态寄存器共用
-const DISK_STATUS_SEEK          : u8 = 1<<4;    //命令寄存器端口,和状态寄存器共用
-const DISK_STATUS_REQ           : u8 = 1<<3;    //命令寄存器端口,和状态寄存器共用
-const DISK_STATUS_ERROR         : u8 = 1<<0;    //命令寄存器端口,和状态寄存器共用
+const PORT_IDE0_BASE        : u16 = 0x1F0;  //
+const PORT_IDE1_BASE        : u16 = 0x170;  //
+
+const PORT_IDE0_CONTROL     : u16 = 0x3F6;  //命令控制端口
+const PORT_IDE1_CONTROL     : u16 = 0x376;  
+
+bitflags! { 
+    ///目录项属性
+    struct IdeStatus: u8 {
+        const BUSY  = 0b1000_0000;
+        const READY = 0b0100_0000;
+        const DF    = 0b0010_0000;
+        const SEEK  = 0b0001_0000;
+        const REQ   = 0b0000_1000;
+        const ERROR = 0b0000_0001;
+    }
+}
+
+pub struct IdeDiskDriver {
+    index : u8,
+    port_base : u16,
+    port_control : u16,
+}
+
+lazy_static! {
+    /// 两条IDE线，各两块硬盘，共4块硬盘
+    pub static ref IDE_DISKS : [IdeDiskDriver; 4] = [
+        IdeDiskDriver{
+            index : 0,
+            port_base : PORT_IDE0_BASE,
+            port_control : PORT_IDE0_CONTROL,
+        },
+        IdeDiskDriver{
+            index : 1,
+            port_base : PORT_IDE0_BASE,
+            port_control : PORT_IDE0_CONTROL,
+        },
+        IdeDiskDriver{
+            index : 2,
+            port_base : PORT_IDE1_BASE,
+            port_control : PORT_IDE1_CONTROL,
+        },
+        IdeDiskDriver{
+            index : 3,
+            port_base : PORT_IDE1_BASE,
+            port_control : PORT_IDE1_CONTROL,
+        },
+    ];
+}
 
 #[repr(packed)]
 #[derive(Clone,Copy,Debug)]
@@ -114,7 +163,7 @@ pub struct DiskIdentifyInfo {
     
 	///	64	15:8	Reserved
 	///		7:0	PIO mdoes supported
-    pub PORT_mode_supported: u16,
+    pub port_mode_supported: u16,
 
     ///  65     Minimum Multiword DMA transfer cycle time per word
     pub min_mul_word_dma_cycle_time_per_word: u16,
@@ -123,10 +172,10 @@ pub struct DiskIdentifyInfo {
     pub manufacture_recommend_mulword_dma_cycle_time: u16,
 
 	///	67	Minimum PIO transfer cycle time without flow control
-	pub min_PORT_cycle_time_flow_control : u16,
+	pub min_port_cycle_time_flow_control : u16,
 
 	///	68	Minimum PIO transfer cycle time with IORDY flow control
-	pub min_PORT_cycle_time_ioredy_flow_control : u16,
+	pub min_port_cycle_time_ioredy_flow_control : u16,
 
 	///	69-70	Reserved
 	pub reserved1 : [ u16; 2],
@@ -212,7 +261,7 @@ pub struct DiskIdentifyInfo {
 	pub streaming_performance_granularity : [u16; 2],
 
 	///	100-103	Total Number of User Addressable Logical Sectors for 48-bit commands (QWord)
-	pub total_user_lba_for_48_address_feature_set : [u16; 4],
+	pub total_user_lba_for_48_address_feature_set : u64,
 
 	///	104	Streaming Transger Time-PIO
 	pub streaming_transfer_time_pio : u16,
@@ -332,92 +381,116 @@ pub struct DiskIdentifyInfo {
 	pub integrity_word : u16,
 }
 
-// hw_int_controller disk_int_controller = 
-// {
-// 	.enable = IOAPIC_enable,
-// 	.disable = IOAPIC_disable,
-// 	.install = IOAPIC_install,
-// 	.uninstall = IOAPIC_uninstall,
-// 	.ack = IOAPIC_edge_ack,
-// };
+impl IdeDiskDriver {
+    fn wait(&self) {
+        while unsafe { asm_in_byte(self.port_base + ISA_STATUS) } & IdeStatus::BUSY.bits != 0 {}
+    }
 
-// void disk_handler(unsigned long nr, unsigned long parameter, struct pt_regs * regs)
-// {
-// 	int i = 0;
-// 	unsigned char a[512];
-// 	port_insw(PORT_DISK1_DATA,&a,256);
-// 	color_printk(ORANGE,WHITE,"Read One Sector Finished:%02x\n",io_in8(PORT_DISK1_STATUS_CMD));
-// 	for(i = 0;i<512;i++)
-// 		color_printk(ORANGE,WHITE,"%02x ",a[i]);
-// }
+    fn wait_error(&self) -> bool {
+        self.wait();
+        let status = unsafe { asm_in_byte(self.port_base + ISA_STATUS) };
+        status & (IdeStatus::DF.bits | IdeStatus::ERROR.bits) != 0
+    }
 
+    fn select(&self, sector: u64, count: u8) {
+        assert_ne!(count, 0);
+        self.wait();
+        unsafe {
+            // generate interrupt
+            asm_out_byte(self.port_control, 0);
+            asm_out_byte(self.port_base + ISA_SECTOR_COUNT, count);
+            asm_out_byte(self.port_base + ISA_SECTOR_INDEX, (sector & 0xFF) as u8);
+            asm_out_byte(self.port_base + ISA_CYLINDER_LOW, ((sector >> 8) & 0xFF) as u8);
+            asm_out_byte(self.port_base + ISA_CYLINDER_HIGH, ((sector >> 16) & 0xFF) as u8);
+            asm_out_byte(self.port_base + ISA_DEVICE,
+                0xE0 | ((self.index & 1) << 4) | (((sector >> 24) & 0xF) as u8),
+            );
+        }
+    }
 
-use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_insw, asm_insd}, device::serial, serial_println, parallel::apic::*, serial_print};
+    pub fn init(&self) -> Result<DiskIdentifyInfo,()> {
+        self.wait();
+        unsafe {
+            // step1: select drive
+            asm_out_byte(self.port_base + ISA_DEVICE, (0xE0 | ((self.index & 1) << 4)) as u8);
+            self.wait();
 
-pub fn disk_init() {
-    disk0_init();
-    // disk1_init();
-}
+            // step2: send ATA identify command
+            asm_out_byte(self.port_base + ISA_COMMAND, IDE_COMMAND_IDENTIFY);
+            self.wait();
 
-pub fn disk0_init() {
-    unsafe {
-        // asm_out_byte(PORT_DISK0_CONTROL,0);
-        // // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0);
-	    // while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
-	    // serial_println!("Read One Sector Starting:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
+            // step3: polling
+            if asm_in_byte(self.port_base + ISA_STATUS) == 0 || self.wait_error() {
+                return Err(());
+            }
 
-        // asm_out_byte(PORT_DISK0_DEVICE,0xf0);
-        // asm_out_byte(PORT_DISK0_ERROR,0);
-        // asm_out_byte(PORT_DISK0_SECTOR_COUNT,1);
-        // asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
-        // asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
-        // asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
-    	// while (asm_in_byte(PORT_DISK0_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
-    	// serial_println!("Send CMD:{}",asm_in_byte(PORT_DISK0_STATUS_COMMAND));
-        // //read
-        // asm_out_byte(PORT_DISK0_STATUS_COMMAND,0x20);	
+            //读取磁盘信息
+            let mut data = [0; SECTOR_SIZE];
+            asm_in_u32(self.port_base + ISA_DATA, data.as_mut_ptr(), SECTOR_SIZE);
+            let disk_info = *(data.as_mut_ptr() as *mut DiskIdentifyInfo);
+            // serial_println!("{:?}", disk_info);
+            print_u8_arrays("serial_number = ",disk_info.serial_number.as_ptr(),20);
+            print_u8_arrays("firmware_version = ",disk_info.firmware_version.as_ptr(),8);
+            print_u8_arrays("model_number = ",disk_info.model_number.as_ptr(),40);
+            let total_sector = disk_info.total_user_lba_for_48_address_feature_set;
+            let total_kb = total_sector / 2;
+            if total_kb < 1024  {
+                serial_println!("total_size = {} KB",total_kb);
+            } else {
+                let total_mb = total_kb as f64 / 1024.0;
+                if total_mb < 1024.0 {
+                    serial_println!("total_size = {} MB",total_mb);
+                } else {
+                    let total_gb = total_mb as f64 / 1024.0;
+                    serial_println!("total_size = {} GB",total_gb);
+                }
+            }
+            Ok(disk_info)
+        }
+    }
 
-        asm_out_byte(PORT_DISK0_CONTROL,0);
-        asm_out_byte(PORT_DISK0_ERROR,0);
-        asm_out_byte(PORT_DISK0_SECTOR_COUNT,0);
-        asm_out_byte(PORT_DISK0_SECTOR_NUMBER,0);
-        asm_out_byte(PORT_DISK0_CYLINDER_LOW,0);
-        asm_out_byte(PORT_DISK0_CYLINDER_HIGH,0);
-        asm_out_byte(PORT_DISK0_DEVICE,0xf0);
-        asm_out_byte(PORT_DISK0_STATUS_COMMAND,0xec);
+    /// Read ATA DMA. Block size = 512 bytes.
+    pub fn read(&self, sector: u64, count: usize, data: &mut [u32]) -> Result<(), ()> {
+        assert_eq!(data.len(), count * SECTOR_SIZE);
+        self.wait();
+        unsafe {
+            self.select(sector, count as u8);
+            asm_out_byte(self.port_base + ISA_COMMAND, IDE_COMMAND_READ);
+            for i in 0..count {
+                let ptr = &mut data[(i as usize) * SECTOR_SIZE];
+                if self.wait_error() {
+                    return Err(());
+                }
+                asm_in_u32(self.port_base + ISA_DATA, ptr, SECTOR_SIZE);
+            }
+            for i in data {
+                serial_print!("{:04x} ",i);
+            }        
+        }
+        Ok(())
+    }
+
+    /// Write ATA DMA. Block size = 512 bytes.
+    pub fn write(&self, sector: u64, count: usize, data: &[u32]) -> Result<(), ()> {
+        assert_eq!(data.len(), count * SECTOR_SIZE);
+        self.wait();
+        unsafe {
+            self.select(sector, count as u8);
+            asm_out_byte(self.port_base + ISA_COMMAND, IDE_COMMAND_WRITE);
+            for i in 0..count {
+                let ptr = &data[(i as usize) * SECTOR_SIZE];
+                if self.wait_error() {
+                    return Err(());
+                }
+                asm_out_u32(self.port_base + ISA_DATA, ptr, SECTOR_SIZE);
+            }
+        }
+        Ok(())
     }
 }
 
-pub fn disk1_init() {
-	unsafe { 
-        // asm_out_byte(PORT_DISK1_CONTROL,0);
-        // // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0);
-	    // while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_BUSY) != 0 {}
-	    // serial_println!("Read One Sector Starting:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
-
-        // asm_out_byte(PORT_DISK1_DEVICE,0xe0);
-        // asm_out_byte(PORT_DISK1_ERROR,0);
-        // asm_out_byte(PORT_DISK1_SECTOR_COUNT,1);
-        // asm_out_byte(PORT_DISK1_SECTOR_NUMBER,0);
-        // asm_out_byte(PORT_DISK1_CYLINDER_LOW,0);
-        // asm_out_byte(PORT_DISK1_CYLINDER_HIGH,0);
-    	// while (asm_in_byte(PORT_DISK1_STATUS_COMMAND) & DISK_STATUS_READY) == 0 {}
-    	// serial_println!("Send CMD:{:02x}",asm_in_byte(PORT_DISK1_STATUS_COMMAND));
-        // //read
-        // asm_out_byte(PORT_DISK1_STATUS_COMMAND,0x20);	
-
-        asm_out_byte(PORT_DISK1_CONTROL,0);
-        asm_out_byte(PORT_DISK1_ERROR,0);
-        asm_out_byte(PORT_DISK1_SECTOR_COUNT,0);
-        asm_out_byte(PORT_DISK1_SECTOR_NUMBER,0);
-        asm_out_byte(PORT_DISK1_CYLINDER_LOW,0);
-        asm_out_byte(PORT_DISK1_CYLINDER_HIGH,0);
-        asm_out_byte(PORT_DISK1_DEVICE,0xe0);
-        asm_out_byte(PORT_DISK1_STATUS_COMMAND,0xec);
-    };
+pub fn ide_handler(ide_index : usize) {
 }
-
-const DISK_DATA_PORT : [u16; 2] = [PORT_DISK0_DATA,PORT_DISK1_DATA]; 
 
 pub fn print_u8_arrays(title : &str, string : *const u8, size : isize ) {
     serial_print!("{}",title);
@@ -427,20 +500,4 @@ pub fn print_u8_arrays(title : &str, string : *const u8, size : isize ) {
         }
     }
     serial_print!("\n");
-}
-
-pub fn disk_handler(disk_index : usize) {
-    let mut buffer : [u32; 128] = [0; 128];
-    unsafe{
-        asm_insd(DISK_DATA_PORT[disk_index],buffer.as_mut_ptr(),128);
-        serial_println!("Read One Sector Finished:{}", asm_in_byte(PORT_DISK0_STATUS_COMMAND));
-        let disk_info = *(buffer.as_mut_ptr() as *mut DiskIdentifyInfo);
-        serial_println!("{:?}", disk_info);
-        print_u8_arrays("serial_number = ",disk_info.serial_number.as_ptr(),20);
-        print_u8_arrays("firmware_version = ",disk_info.firmware_version.as_ptr(),8);
-        print_u8_arrays("model_number = ",disk_info.model_number.as_ptr(),40);
-    }
-    // for i in buffer {
-    //     serial_print!("{:08x} ",i);
-    // }
 }
