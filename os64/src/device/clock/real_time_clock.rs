@@ -1,11 +1,11 @@
-use crate::architecture::x86_64_asm::{asm_out_byte, asm_in_byte, asm_clear_interrupt_flag, asm_set_interrupt_flag};
+use crate::architecture::x86_64_asm::{asm_out_u8, asm_in_u8, asm_clear_interrupt_flag, asm_set_interrupt_flag};
 
 
 pub(crate) const NAME: &'static str = "/Device/RealTimeClock";
 
 pub unsafe fn cmos_read(addr : u8) -> u8 {
-    asm_out_byte(0x70, addr);
-    let v = asm_in_byte(0x71);
+    asm_out_u8(0x70, addr);
+    let v = asm_in_u8(0x71);
     (((v & 0xF0) >> 4) * 10 )+ (v & 0x0F)
 }
 

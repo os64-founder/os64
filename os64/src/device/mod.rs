@@ -28,6 +28,6 @@ pub trait BlockDevice: Device {
 }
 
 pub fn devices_init() {
-    let _ = IDE_DISKS[0].init();
-    let _ = IDE_DISKS[1].init();
+    // let _ =IDE_DISKS[0].init();
+    // IDE_DISKS[1].init();
 }

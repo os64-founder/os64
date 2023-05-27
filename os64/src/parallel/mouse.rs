@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use spin::Mutex;
-use crate::{architecture::x86_64_asm::{asm_out_byte, asm_in_byte}, serial_println};
+use crate::{architecture::x86_64_asm::{asm_out_u8, asm_in_u8}, serial_println};
 
 bitflags! { 
     /// Represents the flags currently set for the mouse.
@@ -139,7 +139,7 @@ const SET_DEFAULTS              : u8 = 0xF6;
 pub unsafe fn wait_for_read() -> Result<(), &'static str> {
     let timeout = 100_000;
     for _ in 0..timeout {
-        let value = asm_in_byte(PORT_MOUSE_COMMAND);
+        let value = asm_in_u8(PORT_MOUSE_COMMAND);
         if (value & STATUS_OUTPUT_BUFFER_FULL) != 0 {
             return Ok(());
         }
@@ -151,7 +151,7 @@ pub unsafe fn wait_for_read() -> Result<(), &'static str> {
 pub unsafe fn wait_for_write() -> Result<(), &'static str> {
     let timeout = 100_000;
     for _ in 0..timeout {
-        let value = asm_in_byte(PORT_MOUSE_COMMAND);
+        let value = asm_in_u8(PORT_MOUSE_COMMAND);
         if (value & STATUS_INPUT_BUFFER_FULL) == 0 {
             return Ok(());
         }
@@ -162,20 +162,20 @@ pub unsafe fn wait_for_write() -> Result<(), &'static str> {
 #[inline(always)]
 pub unsafe fn write_command(data: u8) -> Result<(), &'static str> {
     wait_for_write()?;
-    asm_out_byte(PORT_MOUSE_COMMAND,data);
+    asm_out_u8(PORT_MOUSE_COMMAND,data);
     Ok(())
 }
 
 #[inline(always)]
 pub unsafe fn read_data() -> Result<u8, &'static str> {
     wait_for_read()?;
-    Ok(asm_in_byte(PORT_MOUSE_DATA))
+    Ok(asm_in_u8(PORT_MOUSE_DATA))
 }
 
 #[inline(always)]
 pub unsafe fn write_data(data: u8) -> Result<(), &'static str> {
     wait_for_write()?;
-    asm_out_byte(PORT_MOUSE_DATA, data);
+    asm_out_u8(PORT_MOUSE_DATA, data);
     Ok(())
 }
 
@@ -204,7 +204,7 @@ lazy_static! {
 
 pub fn mouse_handler() {
     unsafe { 
-        let x = asm_in_byte(PORT_MOUSE_DATA);
+        let x = asm_in_u8(PORT_MOUSE_DATA);
         // mouse_buffer.push(x);
         MOUSE.lock().process_packet(x);
     }

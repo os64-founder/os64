@@ -1,23 +1,37 @@
 
-///磁盘分区表入口, 16字节
-#[repr(packed)]
-pub struct DiskPartitionTableEntry {
-	flags : u8,
-	start_head : u8,
-	start_sector_cylinder:u16,//0~5bit: sector; 6~15bit: cylinder
-	kind : u8,
-	end_head : u8,
-	end_sector_cylinder	:u16,//0~5bit: sector; 6~15bit: cylinder
-	start_lba : u32,
-	sectors_limit : u32,
-}
-
-///磁盘分区表, 512 字节
-#[repr(packed)]
-pub struct DiskPartitionTable {
-	reserved : [u8; 446],
-	parts : [DiskPartitionTableEntry; 4],
-	trail_sign : u16,
+/// 0  空              24  NEC DOS         81  Minix / 旧 Linu bf  Solaris        
+/// 1  FAT12           27  Hidden NTFS Win 82  Linux 交换 / So c1  DRDOS/sec (FAT-
+/// 2  XENIX root      39  Plan 9          83  Linux           c4  DRDOS/sec (FAT-
+/// 3  XENIX usr       3c  PartitionMagic  84  OS/2 hidden or  c6  DRDOS/sec (FAT-
+/// 4  FAT16 <32M      40  Venix 80286     85  Linux 扩展      c7  Syrinx         
+/// 5  扩展            41  PPC PReP Boot   86  NTFS 卷集       da  非文件系统数据 
+/// 6  FAT16           42  SFS             87  NTFS 卷集       db  CP/M / CTOS / .
+/// 7  HPFS/NTFS/exFAT 4d  QNX4.x          88  Linux 纯文本    de  Dell 工具      
+/// 8  AIX             4e  QNX4.x 第2部分  8e  Linux LVM       df  BootIt         
+/// 9  AIX 可启动      4f  QNX4.x 第3部分  93  Amoeba          e1  DOS 访问       
+/// a  OS/2 启动管理器 50  OnTrack DM      94  Amoeba BBT      e3  DOS R/O        
+/// b  W95 FAT32       51  OnTrack DM6 Aux 9f  BSD/OS          e4  SpeedStor      
+/// c  W95 FAT32 (LBA) 52  CP/M            a0  IBM Thinkpad 休 ea  Rufus alignment
+/// e  W95 FAT16 (LBA) 53  OnTrack DM6 Aux a5  FreeBSD         eb  BeOS fs        
+/// f  W95 扩展 (LBA)  54  OnTrackDM6      a6  OpenBSD         ee  GPT            
+/// 10  OPUS            55  EZ-Drive        a7  NeXTSTEP        ef  EFI (FAT-12/16/
+/// 11  隐藏的 FAT12    56  Golden Bow      a8  Darwin UFS      f0  Linux/PA-RISC  
+/// 12  Compaq 诊断     5c  Priam Edisk     a9  NetBSD          f1  SpeedStor      
+/// 14  隐藏的 FAT16 <3 61  SpeedStor       ab  Darwin 启动     f4  SpeedStor      
+/// 16  隐藏的 FAT16    63  GNU HURD or Sys af  HFS / HFS+      f2  DOS 次要       
+/// 17  隐藏的 HPFS/NTF 64  Novell Netware  b7  BSDI fs         fb  VMware VMFS    
+/// 18  AST 智能睡眠    65  Novell Netware  b8  BSDI swap       fc  VMware VMKCORE 
+/// 1b  隐藏的 W95 FAT3 70  DiskSecure 多启 bb  Boot Wizard 隐  fd  Linux raid 自动
+/// 1c  隐藏的 W95 FAT3 75  PC/IX           bc  Acronis FAT32 L fe  LANstep        
+/// 1e  隐藏的 W95 FAT1 80  旧 Minix        be  Solaris 启动    ff  BBT           
+pub enum FileSystemKind {
+    Empty       = 0x00,
+    Fat12       = 0x01,
+    Fat16_V1    = 0x04,
+    Fat16_V2    = 0x06,
+    Fat32_V1    = 0x0B,
+    Fat32       = 0x0C,
+    Fat16       = 0x0A,
 }
 
 pub const MAX_LENGTH_FOR_FILE_SYSTEM_TYPE_NAME : usize = 60;
