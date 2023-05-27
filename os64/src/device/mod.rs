@@ -7,7 +7,7 @@ pub mod serial;
 pub mod usb;
 
 use crate::Error;
-use self::disk::ide::IDE_DISKS;
+use self::disk::{ide::IDE_DISKS, disk::init_disks};
 
 pub trait Device {
     fn open(&self) -> Result<(), Error>;
@@ -28,6 +28,7 @@ pub trait BlockDevice: Device {
 }
 
 pub fn devices_init() {
+    init_disks();
     // let _ =IDE_DISKS[0].init();
     // IDE_DISKS[1].init();
 }

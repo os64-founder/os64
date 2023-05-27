@@ -1,8 +1,12 @@
 // 本文试图完成磁盘的各种抽象及规格
 
+use core::{ptr::null_mut, borrow::BorrowMut, slice};
+
 use alloc::{rc::Rc, vec::Vec, boxed::Box};
 
-use super::ide::IDE_DISKS;
+use crate::{serial_println, device::disk::fat::{Fat16BootSector, Fat32BootSector, Fat16DirectoryItem}, serial_print};
+
+use super::{ide::IDE_DISKS, fat::Fat16BootSectorHeader};
 
 /// 扇区字节数   512
 pub const SECTOR_BYTES  : usize = 512;
@@ -396,9 +400,81 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
     let driver = Box::new(IDE_DISKS[1]);
     let info = Box::new(driver.init().expect(""));
     let mut data : [u32;SECTOR_SIZE] = [0;SECTOR_SIZE];
+
+    //读取启动扇区
     driver.read(0, 1, &mut data);
-    let partition = unsafe{Box::new( * (data.as_mut_ptr() as *mut DiskPartitionTable))};
-    let mut disk = Box::new(Disk::new(DiskKind::HardDisk, driver, info, partition));
-    ret.push(disk);
+
+    //找分区表
+    // let partition = unsafe{Box::new( * (data.as_mut_ptr() as *mut DiskPartitionTable))};
+    // for i in 0..4 {
+    //     serial_println!("partition[{}]={:?}", i, partition.parts[i]);
+    // }
+    // let mut disk = Box::new(Disk::new(DiskKind::HardDisk, driver, info, partition));
+    // ret.push(disk);
+
+    //以Fat16/12方式加载扇区
+    let boot_sector = unsafe {*(data.as_mut_ptr() as *mut Fat16BootSector)};
+    let magic = boot_sector.magic;
+    serial_println!("header={:?}, magic={:04x}", boot_sector.header, magic);
+    print_u8_arrays("oem_name = ", boot_sector.header.oem_name.as_ptr(),8);
+
+    let total_sectors = match boot_sector.header.totel_sectors_u16 == 0 {
+        true => boot_sector.header.totel_sectors as usize,
+        false => boot_sector.header.totel_sectors_u16 as usize,
+    };
+
+    let fat_sectors = boot_sector.header.sectors_per_fat as usize ;
+    let fat_bytes  = fat_sectors * boot_sector.header.bytes_per_sector as usize ;
+    let fat_bits = fat_bytes * 8 / (total_sectors / boot_sector.header.sectors_per_cluster as usize);
+    serial_println!("fat_bits = {}", fat_bits);
+
+    if fat_bits < 32 {
+        // if fat_bits >= 16 { //FAT16
+        // } else { //FAT12
+        // }
+        print_u8_arrays("volume_label = ", boot_sector.header.volume_label.as_ptr(),11);
+        print_u8_arrays("file_system_type = ", boot_sector.header.file_system_type.as_ptr(),8);
+    } else { //FAT32
+        let boot_sector: Fat32BootSector = unsafe {*(data.as_mut_ptr() as *mut Fat32BootSector)};
+        let header = boot_sector.header;
+        // let magic = boot_sector.magic;
+        // serial_println!("header={:?}, magic={:04x}", header, magic);
+        // print_u8_arrays("oem_name = ", header.oem_name.as_ptr(),8);
+        print_u8_arrays("volume_label = ", header.volume_label.as_ptr(),11);
+        print_u8_arrays("file_system_type = ", header.file_system_type.as_ptr(),8);
+    }
+
+    //以下代码假设是FAT16,尚未调试通过
+    //加载FAT
+    // let mut fat = unsafe { Vec::from_raw_parts(null_mut::<u16>(), fat_bytes / 2, fat_bytes) };
+    // let data =  unsafe { slice::from_raw_parts_mut(fat.as_mut_ptr() as *mut u32, fat_bytes / 4) };
+    // let fat_start_sectors = boot_sector.header.reserved_sectors as u64;
+    // driver.read(fat_start_sectors, fat_sectors, data);
+
+    //加载根目录
+    // let root_sectors = (boot_sector.header.root_entries * 32 / boot_sector.header.bytes_per_sector) as usize;
+    // let root_bytes = root_sectors * boot_sector.header.bytes_per_sector as usize;
+    // let mut root_buffer = unsafe { Vec::from_raw_parts(null_mut::<Fat16DirectoryItem>(), root_bytes / 32, root_bytes) };
+    // let data =  unsafe { slice::from_raw_parts_mut(root_buffer.as_mut_ptr() as *mut u32, root_bytes / 4) };
+    // let root_start_sectors = boot_sector.header.reserved_sectors  as u64 + boot_sector.header.fats as u64 * boot_sector.header.sectors_per_fat as u64;
+    // driver.read(root_start_sectors, root_sectors, data);
+    // for i in root_buffer {
+    //     if i.attributes != 0 {
+    //         print_u8_arrays("find file = ", i.name.as_ptr(),11);
+    //         let file_size = i.file_size;
+    //         serial_println!("file_size = {}", file_size);
+    //     }
+    // }
+
     ret
+}
+
+pub fn print_u8_arrays(title : &str, string : *const u8, size : isize ) {
+    serial_print!("{}",title);
+    unsafe {
+        for i in 0..size {
+            serial_print!("{}",*(string.offset(i)) as char);
+        }
+    }
+    serial_print!("\n");
 }

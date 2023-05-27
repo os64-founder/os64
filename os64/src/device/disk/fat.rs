@@ -1,12 +1,11 @@
-// 本文试图实现 FAT12/16/32
+//see also: https://wiki.osdev.org/FAT
+// 本文试图实现 FAT12/16/32,将来也考虑ExFAT及vFAT
 // FAT：文件分配表(File Allocation Table)
 // 链表结构：文件中的数据块，FAT 用 链表结构 表示
 // 支持对磁盘空间的划分管理,如簇(Cluster)的概念
-// FAT12:常用于软盘，720K / 1.44M / 2.88M ； FAT16:<2GB； FAT32:<2TB 
-// 文件大小上限不同: FAT12:<4MB, FAT16:<2GB, FAT32:<4GB。
-// 簇大小不同: FAT12:0.5~2KB, FAT16:16KB~64KB, FAT32:4KB~32KB。
-// 文件分配表大小不同: FAT12:12比特, FAT16:16比特, FAT32:32比特。
-// FAT12:早期DOS, FAT16:DOS/Windows, FAT32:Windows98及以上。
+// FAT12: 常用于软盘。文件分配表单项12bit,簇大小0.5~4KB,最大容量小于16M
+// FAT16: 用于早期硬盘。文件分配表单项16bit,簇大小最大64KB,最大容量小于4G
+// FAT32: 文件分配表单项32bit(但保留最高4bit),簇大小最大2~32KB
 
 //
 //  (FAT12) 1.44M 软盘扇区示意图
@@ -45,35 +44,38 @@ bitflags! {
 /// FAT12/16 不同之处在于 FAT 项是 12bit 还是 16 bit
 /// 磁道数(也叫柱面数) = sectors / sectors_per_track / heads = 2880 / 18 / 2 = 80
 #[repr(packed)] 
+#[derive(Clone,Copy,Debug)]
 pub struct Fat16BootSectorHeader {
-    jmp_boot: [u8;3],       // 跳转指令
-    oem_name: [u8;8],       // OEM名称,如 'OS64    '
-    bytes_per_sector: u16,  // 每扇区字节数,512
-    sectors_per_cluster: u8,// 每簇扇区数, 1
-    reserved_sectors: u16,  // 保留扇区数, FAT12必须为1
-    fats: u8,               // FAT表个数, 2
-    root_entries: u16,      // 根目录项数, 224
-    sectors: u16,           // 总扇区数, 2880/1440...
-    media: u8,              // 媒体描述符, 0xF0
-    sectors_per_fat: u16,   // FAT占用扇区数, 9
-    sectors_per_track: u16, // 每磁道扇区数, 18
-    heads: u16,             // 磁头数, 2
-    hidden_sectoss: u32,    // 隐藏扇区数, 0 
-    totel_sectors: u32,     // 总扇区数(若sectors为0)
-    drviver_number: u8,     // 驱动器号(用于int13中断), 0
-    reserved1: u8,          // 0
-    boot_sign: u8,          // 扩展引导标记, 0x29
-    volume_id: u32,         // 卷序列号, 0
-    volume_label: [u8;11],  // 卷标 'OS64    '
-    file_system_type: [u8;8],//文件系统类型, 'FAT12   '
+    pub jmp_boot: [u8;3],       // 跳转指令
+    pub oem_name: [u8;8],       // OEM名称,如 'OS64    '
+    pub bytes_per_sector: u16,  // 每扇区字节数,512
+    pub sectors_per_cluster: u8,// 每簇扇区数, 1
+    pub reserved_sectors: u16,  // 保留扇区数, FAT12必须为1
+    pub fats: u8,               // FAT表个数, 2
+    pub root_entries: u16,      // 根目录项数, 224
+    pub totel_sectors_u16: u16, // 总扇区数, 2880/1440...
+    pub media: u8,              // 媒体描述符, 0xF0 0xF8
+    pub sectors_per_fat: u16,   // FAT占用扇区数, 9
+    pub sectors_per_track: u16, // 每磁道扇区数, 18
+    pub heads: u16,             // 磁头数, 2
+    pub hidden_sectoss: u32,    // 隐藏扇区数, 0 
+    pub totel_sectors: u32,     // 总扇区数(若sectors为0)
+
+    pub drviver_number: u8,     // 驱动器号(用于int13中断), 0
+    pub reserved1: u8,          // 0
+    pub boot_sign: u8,          // 扩展引导标记, 0x29
+    pub volume_id: u32,         // 卷序列号, 0
+    pub volume_label: [u8;11],  // 卷标 'OS64    '
+    pub file_system_type: [u8;8],//文件系统类型, 'FAT12   '
 }
 
 ///共62+448+2=512字节
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct Fat16BootSector {
-    header: Fat16BootSectorHeader,
-    boot_code: [u8;448],    // 引导代码
-    magic: [u8;2],          // 魔数,0xAA55
+    pub header: Fat16BootSectorHeader,
+    pub boot_code: [u8;448],    // 引导代码
+    pub magic: u16,          // 魔数,0xAA55
 }
 
 /// FAT32 的 BootSectorHeader 共90字节
@@ -86,109 +88,118 @@ pub struct Fat16BootSector {
 ///  |            |             |             |             |             |            |            |            |               |
 ///  |____________| ____________| ____________| ____________| ____________|____________|____________|____________|_______________|
 ///   0            1             2             6             7             36           2086         4136         4144
-struct Fat32BootSectorHeader {
-    jmp_boot: [u8;3],       // 跳转指令, 0x9058EB
-    oem_name: [u8;8],       // OEM名称,如 'OS64    '
-    bytes_per_sector: u16,  // 每扇区字节数, 512
-    sectors_per_cluster: u8,// 每簇扇区数, 8
-    reserved_sectors: u16,  // 保留扇区数, 36
-    fats: u8,               // FAT表个数, 2
-    root_entries: u16,      // 根目录项数, 0
-    total_sectors_u16: u16, // 总扇区数, 0
-    media: u8,              // 媒体描述符, 0xF8
-    sectors_per_fat_u16: u16,// FAT占用扇区数, 0
-    sectors_per_track: u16, // 每磁道扇区数, 63
-    heads: u16,             // 磁头数, 255
-    hidden_sectors: u32,    // 隐藏扇区数, 2048 
-    totel_sectors: u32,     // 总扇区数(若sectors为0) 2103296
+#[repr(packed)]
+#[derive(Clone,Copy,Debug)]
+pub struct Fat32BootSectorHeader {
+    pub jmp_boot: [u8;3],       // 跳转指令, 0x9058EB
+    pub oem_name: [u8;8],       // OEM名称,如 'OS64    '
+    pub bytes_per_sector: u16,  // 每扇区字节数, 512
+    pub sectors_per_cluster: u8,// 每簇扇区数, 8
+    pub reserved_sectors: u16,  // 保留扇区数, 36
+    pub fats: u8,               // FAT表个数, 2
+    pub root_entries: u16,      // 根目录项数, 0
+    pub total_sectors_u16: u16, // 总扇区数, 0
+    pub media: u8,              // 媒体描述符, 0xF8
+    pub sectors_per_fat_u16: u16,// FAT占用扇区数, 0
+    pub sectors_per_track: u16, // 每磁道扇区数, 63
+    pub heads: u16,             // 磁头数, 255
+    pub hidden_sectors: u32,    // 隐藏扇区数, 2048 
+    pub totel_sectors: u32,     // 总扇区数(若sectors为0) 2103296
 
-	sectors_per_fat: u32,   // FAT占用扇区数, 2050
-    extended_flags: u16,    // 扩展标志, 0
-    file_system_version: u16,// FAT32版本号, 0
-    root_cluster : u32,     //根目录簇号, 2
-	fs_info_sector : u16,   // fs_info 结构体扇区号, 1
-    boot_sector_backup : u16,// 引导扇区备份扇区号, 6
-	reserved : [u8;12],     //保留, 0
+	pub sectors_per_fat: u32,   // FAT占用扇区数, 2050
+    pub extended_flags: u16,    // 扩展标志, 0
+    pub file_system_version: u16,// FAT32版本号, 0
+    pub root_cluster : u32,     //根目录簇号, 2
+	pub fs_info_sector : u16,   // fs_info 结构体扇区号, 1
+    pub boot_sector_backup : u16,// 引导扇区备份扇区号, 6
+	pub reserved : [u8;12],     //保留, 0
 
-    drviver_number: u8,     // 驱动器号(用于int13中断), 0x80
-    reserved1: u8,          // 0
-    boot_sign: u8,          // 扩展引导标记, 0x29
-    volume_id: u32,         // 卷序列号, 0x00004823
-    volume_label: [u8;11],  // 卷标 'OS64    '
-    file_system_type: [u8;8],//文件系统类型, 'FAT32   '
+    pub drviver_number: u8,     // 驱动器号(用于int13中断), 0x80
+    pub reserved1: u8,          // 0
+    pub boot_sign: u8,          // 扩展引导标记, 0x29
+    pub volume_id: u32,         // 卷序列号, 0x00004823
+    pub volume_label: [u8;11],  // 卷标 'OS64    '
+    pub file_system_type: [u8;8],//文件系统类型, 'FAT32   '
 }
 
 ///共90+420+2=512字节
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct Fat32BootSector {
-    header: Fat32BootSectorHeader,//
-    boot_code: [u8;420],    // 引导代码
-    magic: [u8;2],          // 魔数,0xAA55
+    pub header : Fat32BootSectorHeader,//
+    pub boot_code : [u8;420],    // 引导代码
+    pub magic : u16,          // 魔数,0xAA55
 }
 
 
 ///目录项，32字节，每扇区可以存 512/32 = 16 项
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct Fat16DirectoryItem {
-    name : [u8;11],         //文件名 8+3 结构
-    attributes : u8,        //文件属性
-    reserved : [u8;10],     //保留
-    write_time : u16,       //最后修改时间
-    write_date : u16,       //最后修改日期
-    cluster_index : u16,    //起始簇号
-    file_size : u32,        //文件大小
+    pub name : [u8;11],         //文件名 8+3 结构
+    pub attributes : u8,        //文件属性
+    pub reserved : [u8;10],     //保留
+    pub write_time : u16,       //最后修改时间
+    pub write_date : u16,       //最后修改日期
+    pub cluster_index : u16,    //起始簇号
+    pub file_size : u32,        //文件大小
 }
 
 /// 目录项，32字节，每扇区可以存 512/32 = 16 项
 /// 和Fat16DirectoryItem不同之处在于： 10个保留字节已经被使用
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct Fat32DirectoryItem
 {
-    name : [u8;11],         //文件名 8+3 结构
-    attributes : u8,        //文件属性
-	reserved : u8,          //保留
-                            //EXT|BASE => 8(BASE).3(EXT)
-                            //BASE:LowerCase(8),UpperCase(0)
-                            //EXT:LowerCase(16),UpperCase(0)
-	create_time_tenth : u8, //创建时间的毫秒级时间戳
-	create_time : u16,	    //文件创建时间
-	create_date : u16,      //文件创建日期
-	last_access_date : u16, //最后访问日期
-	cluster_index_hight : u16,//起始簇号(高16bit)
-    write_time : u16,       //最后修改时间
-    write_date : u16,       //最后修改日期
-    cluster_index : u16,    //起始簇号
-    file_size : u32,        //文件大小
+    pub name : [u8;11],         //文件名 8+3 结构
+    pub attributes : u8,        //文件属性
+	pub reserved : u8,          //保留
+                                //EXT|BASE => 8(BASE).3(EXT)
+                                //BASE:LowerCase(8),UpperCase(0)
+                                //EXT:LowerCase(16),UpperCase(0)
+	pub create_time_tenth : u8, //创建时间的毫秒级时间戳
+	pub create_time : u16,	    //文件创建时间
+	pub create_date : u16,      //文件创建日期
+	pub last_access_date : u16, //最后访问日期
+	pub cluster_index_hight : u16,//起始簇号(高16bit)
+    pub write_time : u16,       //最后修改时间
+    pub write_date : u16,       //最后修改日期
+    pub cluster_index : u16,    //起始簇号
+    pub file_size : u32,        //文件大小
 }
 
 //为了快速找到空簇而设置的扇区，512字节
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 struct Fat32_FSInfo
 {
-	lead_sign : u32,        //扇区标识符,固定为: 0x41615252
-    reserved1 : [u8;480],   //保留
-	struct_sign : u32,      //结构标识符,固定为: 0x61417272
-	free_count : u32,       //上一次记录的空闲簇数量大概值,如果为 0xffffffff,则需重新计算
-	next_free : u32,        //空闲簇起始搜索位置,如果为 0xffffffff,则从簇号2开始搜索
-	reserved2 : [u8;12],    //保留
-	trail_sign : u32,       //结束标识符,固定为: 0xaa550000
+	pub lead_sign : u32,        //扇区标识符,固定为: 0x41615252
+    pub reserved1 : [u8;480],   //保留
+	pub struct_sign : u32,      //结构标识符,固定为: 0x61417272
+	pub free_count : u32,       //上一次记录的空闲簇数量大概值,如果为 0xffffffff,则需重新计算
+	pub next_free : u32,        //空闲簇起始搜索位置,如果为 0xffffffff,则从簇号2开始搜索
+	pub reserved2 : [u8;12],    //保留
+	pub trail_sign : u32,       //结束标识符,固定为: 0xaa550000
 }
 
 ///长目录项，每项32字节
 #[repr(packed)]
+#[derive(Clone,Copy,Debug)]
 pub struct Fat32DirectoryLongItem
 {
-	order : u8,
-	name1 :[u16; 5],
-	attributes : u8,
-	kind : u8,
-	check_sum : u8,
-	name2 : [u16; 6],
-	first_cluster_low : u16, // 必须为 0
-	name3 : [u16; 2],
+	pub order : u8,
+	pub name1 :[u16; 5],
+	pub attributes : u8,
+	pub kind : u8,
+	pub check_sum : u8,
+	pub name2 : [u16; 6],
+	pub first_cluster_low : u16, // 必须为 0
+	pub name3 : [u16; 2],
 }
 
+#[derive(Clone,Copy,Debug)]
 pub struct Date(u16,u8,u8);
+#[derive(Clone,Copy,Debug)]
 pub struct Time(u8,u8,u8);
 
 impl Date {
@@ -229,6 +240,7 @@ impl From<u16> for Time {
 // unsigned int DISK1_FAT32_read_FAT_Entry(unsigned int fat_entry);
 // unsigned long DISK1_FAT32_write_FAT_Entry(unsigned int fat_entry,unsigned int value);
 
+#[derive(Clone,Copy,Debug)]
 pub struct Fat32;
 
 impl File_System for Fat32 {

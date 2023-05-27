@@ -11,8 +11,10 @@
 #![feature(const_mut_refs)]
 #![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
+#![feature(core_intrinsics)]
 #![test_runner(os64::test_runner)]
 #![reexport_test_harness_main = "test_main"]
+
 
 extern crate alloc;
 
