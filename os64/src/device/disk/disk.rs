@@ -1,10 +1,10 @@
 // 本文试图完成磁盘的各种抽象及规格
 
-use core::{ptr::null_mut, borrow::BorrowMut, slice};
+use core::{ptr::null_mut, borrow::BorrowMut, slice, alloc::GlobalAlloc};
 
 use alloc::{rc::Rc, vec::Vec, boxed::Box};
 
-use crate::{serial_println, device::disk::fat::{Fat16BootSector, Fat32BootSector, Fat16DirectoryItem}, serial_print};
+use crate::{serial_println, device::disk::fat::{Fat16BootSector, Fat32BootSector, Fat16DirectoryItem, Attributes, Date, Time}, serial_print};
 
 use super::{ide::IDE_DISKS, fat::Fat16BootSectorHeader};
 
@@ -446,25 +446,39 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
 
     //以下代码假设是FAT16,尚未调试通过
     //加载FAT
-    // let mut fat = unsafe { Vec::from_raw_parts(null_mut::<u16>(), fat_bytes / 2, fat_bytes) };
-    // let data =  unsafe { slice::from_raw_parts_mut(fat.as_mut_ptr() as *mut u32, fat_bytes / 4) };
-    // let fat_start_sectors = boot_sector.header.reserved_sectors as u64;
-    // driver.read(fat_start_sectors, fat_sectors, data);
+    let mut fat : Vec<u16> = Vec::with_capacity(fat_bytes / 2);
+    unsafe{fat.set_len(fat_bytes / 2 as usize);}
+    let data =  unsafe { slice::from_raw_parts_mut(fat.as_mut_ptr() as *mut u32, fat_bytes / 4) };
+    let fat_start_sectors = boot_sector.header.reserved_sectors as u64;
+    driver.read(fat_start_sectors, fat_sectors, data);
+    serial_println!("fat_start_sectors = {}, fat_sectors = {}", fat_start_sectors, fat_sectors);
 
     //加载根目录
-    // let root_sectors = (boot_sector.header.root_entries * 32 / boot_sector.header.bytes_per_sector) as usize;
-    // let root_bytes = root_sectors * boot_sector.header.bytes_per_sector as usize;
-    // let mut root_buffer = unsafe { Vec::from_raw_parts(null_mut::<Fat16DirectoryItem>(), root_bytes / 32, root_bytes) };
-    // let data =  unsafe { slice::from_raw_parts_mut(root_buffer.as_mut_ptr() as *mut u32, root_bytes / 4) };
-    // let root_start_sectors = boot_sector.header.reserved_sectors  as u64 + boot_sector.header.fats as u64 * boot_sector.header.sectors_per_fat as u64;
-    // driver.read(root_start_sectors, root_sectors, data);
-    // for i in root_buffer {
-    //     if i.attributes != 0 {
-    //         print_u8_arrays("find file = ", i.name.as_ptr(),11);
-    //         let file_size = i.file_size;
-    //         serial_println!("file_size = {}", file_size);
-    //     }
+    let root_sectors = (boot_sector.header.root_entries * 32 / boot_sector.header.bytes_per_sector) as usize;
+    let root_bytes = root_sectors * boot_sector.header.bytes_per_sector as usize;
+    let mut root_buffer  : Vec<Fat16DirectoryItem> = Vec::with_capacity(boot_sector.header.root_entries as usize);
+    unsafe{root_buffer.set_len(boot_sector.header.root_entries as usize);}
+    let data: &mut [u32] =  unsafe { slice::from_raw_parts_mut(root_buffer.as_mut_ptr() as *mut u32, root_bytes / 4) };
+    let root_start_sectors = boot_sector.header.reserved_sectors  as u64 + boot_sector.header.fats as u64 * boot_sector.header.sectors_per_fat as u64;
+    driver.read(root_start_sectors, root_sectors, data);
+    serial_println!("root_start_sectors = {}, root_sectors = {}", root_start_sectors, root_sectors);
+    // for i in 0..128 {
+    //     serial_print!("{:08x} ",data[i]);
     // }
+    // serial_print!("");
+
+    serial_println!("root_buffer.len() = {}", root_buffer.len());
+
+    for i in root_buffer {
+        if i.attributes.contains(Attributes::ARCHIVE) {
+            print_u8_arrays("find file = ", i.name.as_ptr(),11);
+            let file_size = i.file_size;
+            let cluster_index = i.cluster_index;
+            let write_date = Date::from(i.write_date); 
+            let write_time = Time::from(i.write_time); 
+            serial_println!("\tfile_size = {}, cluster_index = {}, write_date = {:?}, write_time = {:?}", file_size, cluster_index, write_date, write_time);
+        }
+    }
 
     ret
 }

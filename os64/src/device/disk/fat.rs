@@ -29,7 +29,7 @@ use super::file_system::*;
 
 bitflags! { 
     ///目录项属性
-    struct Attributes: u8 {
+    pub struct Attributes: u8 {
         const READ_ONLY = 0b0000_0001;
         const HIDDEN    = 0b0000_0010;
         const SYSTEM    = 0b0000_0100;
@@ -58,7 +58,7 @@ pub struct Fat16BootSectorHeader {
     pub sectors_per_fat: u16,   // FAT占用扇区数, 9
     pub sectors_per_track: u16, // 每磁道扇区数, 18
     pub heads: u16,             // 磁头数, 2
-    pub hidden_sectoss: u32,    // 隐藏扇区数, 0 
+    pub hidden_sectors: u32,    // 隐藏扇区数, 0 
     pub totel_sectors: u32,     // 总扇区数(若sectors为0)
 
     pub drviver_number: u8,     // 驱动器号(用于int13中断), 0
@@ -137,7 +137,7 @@ pub struct Fat32BootSector {
 #[derive(Clone,Copy,Debug)]
 pub struct Fat16DirectoryItem {
     pub name : [u8;11],         //文件名 8+3 结构
-    pub attributes : u8,        //文件属性
+    pub attributes : Attributes,//文件属性
     pub reserved : [u8;10],     //保留
     pub write_time : u16,       //最后修改时间
     pub write_date : u16,       //最后修改日期
@@ -152,7 +152,7 @@ pub struct Fat16DirectoryItem {
 pub struct Fat32DirectoryItem
 {
     pub name : [u8;11],         //文件名 8+3 结构
-    pub attributes : u8,        //文件属性
+    pub attributes : Attributes,        //文件属性
 	pub reserved : u8,          //保留
                                 //EXT|BASE => 8(BASE).3(EXT)
                                 //BASE:LowerCase(8),UpperCase(0)
@@ -204,14 +204,14 @@ pub struct Time(u8,u8,u8);
 
 impl Date {
     pub fn to_u16(&self) -> u16 {
-        ((self.0 - 1980) << 9) | ((self.1 as u16 & 0xF) << 4) | (self.2 as u16 & 0x1F)
+        ((self.0 - 1980) << 9) | ((self.1 as u16 & 0xF) << 5) | (self.2 as u16 & 0x1F)
     }
 }
 
 impl From<u16> for Date {
     fn from(value: u16) -> Self {
         let years = (value >> 9) + 1980;
-        let months = (value >> 4)  as u8 & 0xF;
+        let months = (value >> 5)  as u8 & 0xF;
         let days = value as u8 & 0x1F;
         Date(years, months, days)
     }
@@ -219,14 +219,14 @@ impl From<u16> for Date {
 
 impl Time {
     pub fn to_u16(&self) -> u16 {
-        ((self.0 as u16) << 10) | ((self.1 as u16 & 0x3F) << 4) | ((self.2 as u16 / 2) & 0x1F)
+        ((self.0 as u16) << 11) | ((self.1 as u16 & 0x3F) << 5) | ((self.2 as u16 / 2) & 0x1F)
     } 
 }
 
 impl From<u16> for Time {
     fn from(value: u16) -> Self {
-        let hours = (value >> 10) as u8;
-        let minutes = (value >> 4) as u8 & 0x3F; 
+        let hours = (value >> 11) as u8;
+        let minutes = (value >> 5) as u8 & 0x3F; 
         let seconds = (value & 0x1F) as u8 * 2;
         Time(hours, minutes, seconds)
     }

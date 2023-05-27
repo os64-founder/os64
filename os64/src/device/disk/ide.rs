@@ -183,10 +183,12 @@ impl DiskDriver for IdeDiskDriver {
                 }
                 asm_in_u32(self.port_base + ATA_REGISTER_DATA, ptr, SECTOR_SIZE);
             }
-            for i in data {
-                serial_print!("{:08x} ",i);
-            }        
-            serial_print!("\n");
+            // if sector==401 {
+            //     for i in data {
+            //         serial_print!("{:08x} ",i);
+            //     }        
+            // }
+            // serial_print!("\n");
         }
         Ok(())
     }
