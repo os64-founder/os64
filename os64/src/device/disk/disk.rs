@@ -1,12 +1,7 @@
 // 本文试图完成磁盘的各种抽象及规格
-
-use core::{ptr::null_mut, borrow::BorrowMut, slice, alloc::GlobalAlloc};
-
 use alloc::{rc::Rc, vec::Vec, boxed::Box};
-
-use crate::{serial_println, device::disk::fat::{Fat16BootSector, Fat32BootSector, Fat16DirectoryItem, Attributes, Date, Time}, serial_print};
-
-use super::{ide::IDE_DISKS, fat::Fat16BootSectorHeader};
+use crate::{serial_println, device::disk::fat::{Fat16BootSector, Fat32BootSector, Attributes, FAT16Fats, FAT16SuperBlock}, serial_print};
+use super::{ide::IDE_DISKS};
 
 /// 扇区字节数   512
 pub const SECTOR_BYTES  : usize = 512;
@@ -27,24 +22,22 @@ pub enum DiskKind {
     CompactDisk = 3,
 }
 
-///磁盘分区表入口, 16字节
-#[repr(packed)]
-#[derive(Clone,Copy,Debug)]
-pub struct DiskPartitionTableEntry {
-	flags : u8,
-	start_head : u8,
-	start_sector_cylinder:u16,//0~5bit: sector; 6~15bit: cylinder
-	kind : u8,
-	end_head : u8,
-	end_sector_cylinder	:u16,//0~5bit: sector; 6~15bit: cylinder
-	start_lba : u32,
-	sectors_limit : u32,
+///分区表种类
+pub enum PartitionTableKind {
+    None = 0,
+    MBR = 1,
+    GPT = 2,
+    SPP = 3,
 }
 
 ///磁盘分区种类
 #[derive(Clone,Copy,Debug)]
-pub enum DiskPartitionKind {
-    Unknown     = 0,
+pub enum PartitionKind {
+    ///整个分区
+    /// 比较小的硬盘 或 软盘
+    /// 启动扇区没有分区表
+    /// 启动扇区中含有文件文件系统信息
+    Whole       = 0,
     ///主分区
     ///最多4个主分区，或3个主分区+1扩展分区
     Primary     = 1,
@@ -53,6 +46,22 @@ pub enum DiskPartitionKind {
     ///逻辑分区
     ///当有扩展分区时，可以有很多个逻辑分区
     Logical     = 4,
+}
+
+///磁盘分区表入口, 16字节
+#[repr(packed)]
+#[derive(Clone,Copy,Debug)]
+pub struct DiskPartitionTableEntry {
+	flags : u8,
+	start_head : u8,
+    ///0~5bit: sector; 6~15bit: cylinder
+	start_sector_cylinder:u16,
+	kind : u8,
+	end_head : u8,
+    ///0~5bit: sector; 6~15bit: cylinder
+	end_sector_cylinder	:u16,
+	start_lba : u32,
+	sectors_limit : u32,
 }
 
 ///磁盘分区表, 512 字节
@@ -396,9 +405,10 @@ impl Disk {
 ///
 pub fn init_disks() -> Box<Vec<Box<Disk>>> {
     let mut ret : Box<Vec<Box<Disk>>> = Box::new(Vec::new());
-    //检测并添加IDE硬盘
-    let driver = Box::new(IDE_DISKS[1]);
-    let info = Box::new(driver.init().expect(""));
+    //检测硬盘(尚未实现)
+    //添加IDE硬盘
+    let driver = Rc::new(IDE_DISKS[1]);
+    let info = Rc::new(driver.init().expect(""));
     let mut data : [u32;SECTOR_SIZE] = [0;SECTOR_SIZE];
 
     //读取启动扇区
@@ -414,70 +424,47 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
 
     //以Fat16/12方式加载扇区
     let boot_sector = unsafe {*(data.as_mut_ptr() as *mut Fat16BootSector)};
-    let magic = boot_sector.magic;
-    serial_println!("header={:?}, magic={:04x}", boot_sector.header, magic);
-    print_u8_arrays("oem_name = ", boot_sector.header.oem_name.as_ptr(),8);
+    serial_println!("boot_sector={:?}", boot_sector);
+    print_u8_arrays("oem_name = ", boot_sector.oem_name.as_ptr(),8);
 
-    let total_sectors = match boot_sector.header.totel_sectors_u16 == 0 {
-        true => boot_sector.header.totel_sectors as usize,
-        false => boot_sector.header.totel_sectors_u16 as usize,
+    let total_sectors = match boot_sector.totel_sectors_u16 == 0 {
+        true => boot_sector.totel_sectors as usize,
+        false => boot_sector.totel_sectors_u16 as usize,
     };
 
-    let fat_sectors = boot_sector.header.sectors_per_fat as usize ;
-    let fat_bytes  = fat_sectors * boot_sector.header.bytes_per_sector as usize ;
-    let fat_bits = fat_bytes * 8 / (total_sectors / boot_sector.header.sectors_per_cluster as usize);
+    let fat_sectors = boot_sector.sectors_per_fat as usize ;
+    let fat_bytes  = fat_sectors * boot_sector.bytes_per_sector as usize ;
+    let fat_bits = fat_bytes * 8 / (total_sectors / boot_sector.sectors_per_cluster as usize);
     serial_println!("fat_bits = {}", fat_bits);
 
     if fat_bits < 32 {
         // if fat_bits >= 16 { //FAT16
         // } else { //FAT12
         // }
-        print_u8_arrays("volume_label = ", boot_sector.header.volume_label.as_ptr(),11);
-        print_u8_arrays("file_system_type = ", boot_sector.header.file_system_type.as_ptr(),8);
+        print_u8_arrays("volume_label = ", boot_sector.volume_label.as_ptr(),11);
+        print_u8_arrays("file_system_type = ", boot_sector.file_system_type.as_ptr(),8);
+
+        //Create super block
+        let super_block = FAT16SuperBlock::new(driver.clone(), Rc::new(boot_sector));
+
+        // Find /HELLO.TXT
+        let slice = b"HELLO   TXT";
+        let result = super_block.root.find_children(slice, Attributes::empty());
+        serial_println!("found {} file", result.borrow().len());
+
+        // Found and read it
+        if result.borrow().len() > 0 {
+            let result = super_block.root.open_file(driver.clone(),
+                Rc::new(super_block.clone()),result.borrow()[0].clone());
+            let file = result.expect("can not open file");
+            file.read_all_bytes();
+        }
     } else { //FAT32
         let boot_sector: Fat32BootSector = unsafe {*(data.as_mut_ptr() as *mut Fat32BootSector)};
-        let header = boot_sector.header;
-        // let magic = boot_sector.magic;
-        // serial_println!("header={:?}, magic={:04x}", header, magic);
-        // print_u8_arrays("oem_name = ", header.oem_name.as_ptr(),8);
-        print_u8_arrays("volume_label = ", header.volume_label.as_ptr(),11);
-        print_u8_arrays("file_system_type = ", header.file_system_type.as_ptr(),8);
-    }
-
-    //以下代码假设是FAT16,尚未调试通过
-    //加载FAT
-    let mut fat : Vec<u16> = Vec::with_capacity(fat_bytes / 2);
-    unsafe{fat.set_len(fat_bytes / 2 as usize);}
-    let data =  unsafe { slice::from_raw_parts_mut(fat.as_mut_ptr() as *mut u32, fat_bytes / 4) };
-    let fat_start_sectors = boot_sector.header.reserved_sectors as u64;
-    driver.read(fat_start_sectors, fat_sectors, data);
-    serial_println!("fat_start_sectors = {}, fat_sectors = {}", fat_start_sectors, fat_sectors);
-
-    //加载根目录
-    let root_sectors = (boot_sector.header.root_entries * 32 / boot_sector.header.bytes_per_sector) as usize;
-    let root_bytes = root_sectors * boot_sector.header.bytes_per_sector as usize;
-    let mut root_buffer  : Vec<Fat16DirectoryItem> = Vec::with_capacity(boot_sector.header.root_entries as usize);
-    unsafe{root_buffer.set_len(boot_sector.header.root_entries as usize);}
-    let data: &mut [u32] =  unsafe { slice::from_raw_parts_mut(root_buffer.as_mut_ptr() as *mut u32, root_bytes / 4) };
-    let root_start_sectors = boot_sector.header.reserved_sectors  as u64 + boot_sector.header.fats as u64 * boot_sector.header.sectors_per_fat as u64;
-    driver.read(root_start_sectors, root_sectors, data);
-    serial_println!("root_start_sectors = {}, root_sectors = {}", root_start_sectors, root_sectors);
-    // for i in 0..128 {
-    //     serial_print!("{:08x} ",data[i]);
-    // }
-    // serial_print!("");
-
-    serial_println!("root_buffer.len() = {}", root_buffer.len());
-
-    for i in root_buffer {
-        if i.attributes.contains(Attributes::ARCHIVE) {
-            print_u8_arrays("find file = ", i.name.as_ptr(),11);
-            let file_size = i.file_size;
-            let cluster_index = i.cluster_index;
-            let write_date = Date::from(i.write_date); 
-            let write_time = Time::from(i.write_time); 
-            serial_println!("\tfile_size = {}, cluster_index = {}, write_date = {:?}, write_time = {:?}", file_size, cluster_index, write_date, write_time);
-        }
+        // serial_println!("boot_sector={:?}", boot_sector);
+        // print_u8_arrays("oem_name = ", boot_sector.oem_name.as_ptr(),8);
+        print_u8_arrays("volume_label = ", boot_sector.volume_label.as_ptr(),11);
+        print_u8_arrays("file_system_type = ", boot_sector.file_system_type.as_ptr(),8);
     }
 
     ret

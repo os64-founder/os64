@@ -1,3 +1,8 @@
+// 本文试图抽象一个文件系统类
+
+use alloc::{boxed::Box, rc::Rc, vec::Vec, string::String};
+
+use super::disk::DiskDriver;
 
 /// 0  空              24  NEC DOS         81  Minix / 旧 Linu bf  Solaris        
 /// 1  FAT12           27  Hidden NTFS Win 82  Linux 交换 / So c1  DRDOS/sec (FAT-
@@ -37,69 +42,115 @@ pub enum FileSystemKind {
 pub const MAX_LENGTH_FOR_FILE_SYSTEM_TYPE_NAME : usize = 60;
 pub const MAX_PATH : usize = 256;
 
-pub struct SuperBlock {
-	root : *mut Directory,
-	// info : *const!,
+#[derive(Clone,Copy,Debug)]
+pub struct Date(pub u16,pub u8,pub u8);
+#[derive(Clone,Copy,Debug)]
+pub struct Time(pub u8,pub u8,pub u8);
+
+#[derive(Clone,Copy,Debug)]
+pub struct DateTime(pub Date,pub Time);
+
+impl Date {
+    pub fn to_u16(&self) -> u16 {
+        ((self.0 - 1980) << 9) | ((self.1 as u16 & 0xF) << 5) | (self.2 as u16 & 0x1F)
+    }
 }
 
-pub struct IndexNode {
-	file_size : usize,
-	blocks : usize,
-	attribute : usize,
-	super_block : *mut SuperBlock,
-	// info : *const!,
+impl From<u16> for Date {
+    fn from(value: u16) -> Self {
+        let years = (value >> 9) + 1980;
+        let months = (value >> 5)  as u8 & 0xF;
+        let days = value as u8 & 0x1F;
+        Date(years, months, days)
+    }
 }
 
-// #define FS_ATTR_FILE	(1UL << 0)
-// #define FS_ATTR_DIR	(1UL << 1)
-
-pub struct Directory {
-	name : [u8; MAX_PATH],
-	name_length : usize,
-	// child_node : List<Node>,
-	// subdirs_list : List<Directory>,
-	node : IndexNode,
-	// parent : &Directory,
+impl Time {
+    pub fn to_u16(&self) -> u16 {
+        ((self.0 as u16) << 11) | ((self.1 as u16 & 0x3F) << 5) | ((self.2 as u16 / 2) & 0x1F)
+    } 
 }
 
-pub struct File {
-	position : usize,
-	mode : u64,
-	dir : *mut Directory,
-	// data : * const!,
+impl From<u16> for Time {
+    fn from(value: u16) -> Self {
+        let hours = (value >> 11) as u8;
+        let minutes = (value >> 5) as u8 & 0x3F; 
+        let seconds = (value & 0x1F) as u8 * 2;
+        Time(hours, minutes, seconds)
+    }
 }
 
-pub trait File_System {
+// 以下是文件系统需要实现的部分：
+
+pub trait SuperBlock {
+    fn write(&self);
+    fn get_root(&self) -> Rc<dyn Directory>;
+}
+
+pub trait IndexNode {
+    fn get_parent(&self) -> Rc<dyn Directory>;
+    fn get_size(&self) -> usize;
+
+    fn get_name(&self) -> String;
+    fn set_name(&self, name : &str);
+
+    fn get_attribute(&self) -> u64;
+    fn set_attribute(&mut self, value : u64);
     
-    // fn get_name() -> &'static str;
-    // fn get_sign() -> u16;
-
-    fn block_write(block : &SuperBlock);
-    fn block_put(block : &SuperBlock);
-    fn node_write(node :&IndexNode);
-	fn node_create(node :&IndexNode, dir : &Directory, mode : u64) -> u64;
-	// fn node_lookup(node :&Node, dir : &Directory) -> Directory;
-    fn directory_make(node :&IndexNode, dir : &Directory, mode : u64) -> u64;
-    fn directory_remove(node :&IndexNode, dir : &Directory) -> u64;
-	fn directory_rename(old_node :&IndexNode, old_dir : &Directory, new_node : &IndexNode, new_dir : &Directory) -> u64;
-	fn directory_get_attributes(dir : &Directory) -> Result<u64, &'static str>;
-	fn directory_set_attributes(dir : &Directory, attributes : u64) -> Result<(), &'static str>;
-	fn directory_compare(dir : &Directory, source_filename : &'static str, destination_filename : &'static str) -> Result<u64, &'static str>;
-	fn directory_hash(dir : &Directory, filename : &'static str) -> Result<u64, &'static str>;
-	fn directory_release(dir : &Directory) -> Result<u64, &'static str>;
-	fn directory_iput(dir : &Directory, node : &IndexNode) -> Result<u64, &'static str>;
-    fn file_open(file : &File, node : &IndexNode) -> Result<(), &'static str>;
-    fn file_close(file : &File, node : &IndexNode) -> Result<(), &'static str>;
-    fn file_read(file : &File, buffer : *mut u8, size : usize, position : usize) -> Result<u64, &'static str>;
-    fn file_write(file : &File, buffer : *mut u8, size : usize, position : usize) -> Result<u64, &'static str>;
-    fn file_seek(file : &File, offset : usize, origin : u8) -> Result<u64, &'static str>;
-    fn io_control(file : &File, node : &IndexNode, command : u64, argment : u64) -> Result<u64, &'static str>;
+    fn set_write_datetime(&self, value : DateTime);
+    fn get_write_datetime(&self) -> DateTime;
 }
 
-pub fn mount<T : File_System>(directory : &'static str,  device : &'static str, file_system : &T ) -> Result<(),&'static str> {
-    Ok(())
+///已经加载或创建的目录
+pub trait Directory {
+    fn get_node(&self) -> Rc<dyn IndexNode>;
+
+    /// get sub dirs and files
+	fn get_children(&self) -> Vec<Rc<dyn IndexNode>>;
+
+    /// get files
+	fn get_files(&self) -> Vec<Rc<dyn IndexNode>>;
+
+    /// get files
+	fn get_directories(&self) -> Vec<Rc<dyn IndexNode>>;
+
+    /// open the file
+    fn open_file(&self, node : Rc<dyn IndexNode>) -> Rc<dyn File>;
+
+    /// get the sub directory
+    fn load_directory(&self, node : Rc<dyn IndexNode>) -> Rc<dyn Directory>;
+
+    /// create directory
+    fn create_directory(&self) -> Rc<dyn Directory>;
+
+    /// delete directory
+    fn delete_directory(&self);
 }
 
-pub fn unmount<T : File_System>(directory : &'static str ) -> Result<(),&'static str> {
-    Ok(())
+///已经打开或创建的文件
+pub trait File {
+    fn get_node(&self) -> Rc<dyn IndexNode>;
+
+    fn get_mode(&self);
+
+    fn get_position(&self);
+    fn set_position(&self);
+
+    fn read(&self);
+    fn write(&self);
+
+    fn flush(&self);
+    fn close(&self);
 }
+
+pub trait FileSystem {    
+    fn super_block(driver : Rc<dyn DiskDriver>) -> Rc<dyn SuperBlock>;
+}
+
+// pub fn mount<T : FileSystem>(directory : &'static str,  device : &'static str, file_system : &T ) -> Result<(),&'static str> {
+//     Ok(())
+// }
+
+// pub fn unmount<T : FileSystem>(directory : &'static str ) -> Result<(),&'static str> {
+//     Ok(())
+// }
