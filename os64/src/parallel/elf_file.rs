@@ -5,6 +5,8 @@ enum Architecture {
     // ...
 }
 
+#[repr(packed)] 
+#[derive(Clone,Copy,Debug)]
 pub struct ElfHeader {
     magic: [u8; 4],  // 必须是0x7fELF
     class: u8,       // 32/64位架构 
@@ -30,6 +32,8 @@ pub struct ElfHeader {
     // ... 更多字段
 }
 
+#[repr(packed)] 
+#[derive(Clone,Copy,Debug)]
 struct ProgramHeader {
     header_type: u32, // 条目类型
     offset: u64,      // 偏移 
@@ -41,6 +45,8 @@ struct ProgramHeader {
     align: u64,       // 对齐
 }
 
+#[repr(packed)] 
+#[derive(Clone,Copy,Debug)]
 struct SectionHeader {
     name_index: u32,   // 节名字符串表索引
     header_type: u32,  // 条目类型 
@@ -54,6 +60,8 @@ struct SectionHeader {
     entry_size: u64    // 条目大小
 }
 
+#[repr(packed)] 
+#[derive(Clone,Copy,Debug)]
 struct SymbolTableEntry {
     name_index: u32,   // 符号名在字符串表中的索引
     info: u8,          // 符号类型和绑定属性

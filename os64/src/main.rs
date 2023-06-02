@@ -24,7 +24,7 @@ use core::arch::asm;
 // use os64::parallel::{executor::Executor, Task, keyboard};
 use bootloader::{BootInfo, entry_point, bootinfo};
 use x86_64::{VirtAddr, structures::paging::{Translate, Page}};
-use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, devices_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::mouse::{self}};
+use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, devices_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::{mouse::{self}, process::Process}};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -104,9 +104,11 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 
     vga_test();
 
-    unsafe{ 
-        asm!("syscall");
-    }
+    let process = Process::Read("test");
+
+    // unsafe{ 
+    //     asm!("int 0x80");
+    // }
 
     // task_test();
     // print_l4_table(boot_info);

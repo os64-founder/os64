@@ -197,4 +197,3 @@ extern "x86-interrupt" fn system_call_interrupt_handler(_stack_frame: InterruptS
             .notify_end_of_interrupt(InterruptIndex::Serial1.as_u8());
     }
 }
-

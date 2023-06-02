@@ -24,12 +24,12 @@
 //      0xFF0 - 0xFF6 保留  0xFF7 坏簇   0xFF8 - 0xFFF 文件的最后一个簇
 //  
 
-use core::{slice, cell::RefCell, borrow::Borrow};
+use core::{slice, cell::RefCell, borrow::{Borrow, BorrowMut}};
 use bitfield::size_of;
 use bitflags::bitflags;
 use alloc::{boxed::Box, rc::{Rc, Weak}, vec::Vec, string::String};
 use crate::{serial_println, serial_print};
-use super::{disk::{DiskDriver, SECTOR_SIZE}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode}};
+use super::{disk::{DiskDriver, SECTOR_SIZE, SECTOR_BYTES}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode}};
 
 bitflags! { 
     ///目录项属性
@@ -83,6 +83,10 @@ impl Fat16BootSector {
         } else {
             self.totel_sectors_u16 as usize
         }
+    }
+
+    pub fn get_bytes_per_cluster(&self) -> usize {
+        self.bytes_per_sector as usize * self.sectors_per_cluster as usize
     }
 
     //在我们的范例种：
@@ -591,16 +595,17 @@ impl FAT16File {
 
     pub fn read_all_bytes(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<Vec<u8>> {
         let item = self.path.get_child_item(self.node.index);
+        let all_clusters_index = super_block.fats.get_all_clusters(item.cluster_index);
+        let bytes_per_cluster = super_block.sector0.get_bytes_per_cluster();
+        let buffer_size = bytes_per_cluster * all_clusters_index.len();
+        let mut ret : Vec<u8> = Vec::with_capacity(buffer_size);
         let size = item.file_size as usize;
-        let mut ret : Vec<u8> = Vec::with_capacity(size);
         unsafe{ret.set_len(size);}
-        let mut data : [u32;SECTOR_SIZE*4] = [0;SECTOR_SIZE*4];
-        let sector_index = super_block.sector0.get_sector_index(item.cluster_index as usize) as u64;
-        let _ = super_block.driver.read(sector_index, super_block.sector0.sectors_per_cluster as usize, &mut data);
-        let data = unsafe {*(data.as_mut_ptr() as *mut [u8;512*4])};
-        for i in 0..size {
-            ret[i] = data[i];
-            serial_print!("{}", ret[i] as char);
+        let ptr = ret.as_mut_ptr();
+        for i in 0..all_clusters_index.len() {
+            let sector_index = super_block.sector0.get_sector_index(all_clusters_index[i] as usize) as u64;
+            let data = unsafe { slice::from_raw_parts_mut(ptr.add(i * bytes_per_cluster) as *mut u32, bytes_per_cluster / size_of::<u32>()) };
+            let _ = super_block.driver.read(sector_index, super_block.sector0.sectors_per_cluster as usize, data);
         }
         Box::new(ret)
     }

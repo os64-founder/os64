@@ -24,7 +24,7 @@ pub extern "C" fn eh_personality() {}
 pub fn os64_api_call(api_index : u64) {
     unsafe {
         asm!(
-            "syscall",// execute system call
+            "int 0x80",// execute system call
             in("ax") api_index,
         );
     }
