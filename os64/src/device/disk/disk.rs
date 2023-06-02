@@ -445,7 +445,7 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
         print_u8_arrays("file_system_type = ", boot_sector.file_system_type.as_ptr(),8);
 
         //Create super block
-        let super_block = FAT16SuperBlock::new(driver.clone(), Rc::new(boot_sector));
+        let super_block = Rc::new(FAT16SuperBlock::new(driver.clone(), Rc::new(boot_sector)));
 
         // Find /HELLO.TXT
         let slice = b"HELLO   TXT";
@@ -454,10 +454,9 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
 
         // Found and read it
         if result.borrow().len() > 0 {
-            let result = super_block.root.open_file(driver.clone(),
-                Rc::new(super_block.clone()),result.borrow()[0].clone());
+            let result = super_block.root.open_file(&super_block,result.borrow()[0].clone());
             let file = result.expect("can not open file");
-            file.read_all_bytes();
+            file.read_all_bytes(&super_block);
         }
     } else { //FAT32
         let boot_sector: Fat32BootSector = unsafe {*(data.as_mut_ptr() as *mut Fat32BootSector)};

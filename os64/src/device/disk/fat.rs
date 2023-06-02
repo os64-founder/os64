@@ -24,12 +24,12 @@
 //      0xFF0 - 0xFF6 保留  0xFF7 坏簇   0xFF8 - 0xFFF 文件的最后一个簇
 //  
 
-use core::{slice, cell::RefCell, cmp::min};
+use core::{slice, cell::RefCell, borrow::Borrow};
 use bitfield::size_of;
 use bitflags::bitflags;
 use alloc::{boxed::Box, rc::{Rc, Weak}, vec::Vec, string::String};
 use crate::{serial_println, serial_print};
-use super::{disk::{DiskDriver, SECTOR_SIZE}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime}};
+use super::{disk::{DiskDriver, SECTOR_SIZE}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode}};
 
 bitflags! { 
     ///目录项属性
@@ -83,6 +83,16 @@ impl Fat16BootSector {
         } else {
             self.totel_sectors_u16 as usize
         }
+    }
+
+    //在我们的范例种：
+    // 1个保留扇区,2*200个FAT扇区,32个根目录扇区；1、2簇号保留
+    // 所以 (簇号-2)*4 + 433 即 簇号 * 4 + 425
+    pub fn get_sector_index(&self, cluster_index : usize) -> usize {
+        self.hidden_sectors as usize + self.reserved_sectors as usize 
+         + self.fats as usize * self.sectors_per_fat as usize 
+         + self.root_entries as usize * size_of::<Fat16DirectoryItem>() / self.bytes_per_sector as usize
+         + (cluster_index - 2) * self.sectors_per_cluster as usize
     }
 }
 
@@ -221,7 +231,6 @@ pub struct FatDirectoryItemLongName
 /// 以 start_sector_index 为起始扇区，
 /// 共占据 fat_count * sectors_per_fat 扇区。
 pub struct FAT16Fats {
-    pub driver : Rc<dyn DiskDriver>,
     pub data : Vec<u16>,
     pub start_sector_index : u64,
     pub fat_count : usize,
@@ -236,13 +245,13 @@ pub const FAT16_BAD_CLUSTER     : u16 = 0xFFF7;
 pub const FAT16_END_OF_FILE     : u16 = 0xFFFF;
 
 impl FAT16Fats {
-    pub fn new(driver : Rc<dyn DiskDriver>, boot_sector : &Fat16BootSector) -> FAT16Fats {
+    pub fn new(driver : &Rc<dyn DiskDriver>, boot_sector : &Fat16BootSector) -> FAT16Fats {
         let fat_sectors = boot_sector.sectors_per_fat as usize ;
         let fat_bytes  = fat_sectors * boot_sector.bytes_per_sector as usize ;
         let fat_bits = fat_bytes * 8 / (boot_sector.get_totel_sectors() / boot_sector.sectors_per_cluster as usize);
         assert!(fat_bits==16);
         FAT16Fats {
-            driver,
+            // driver,
             data: Vec::new(),
             start_sector_index : boot_sector.reserved_sectors as u64,
             fat_count : boot_sector.fats as usize,
@@ -253,22 +262,22 @@ impl FAT16Fats {
     }
 
     /// read all FATs from disk
-    pub fn init(&mut self) {
+    pub fn init(&mut self, driver : &Rc<dyn DiskDriver>) {
         let fats_sectors = self.fat_count * self.sectors_per_fat;
         let fats_bytes = fats_sectors * self.bytes_per_sector ;
         self.data = Vec::with_capacity(fats_bytes / 2);
         unsafe{self.data.set_len(fats_bytes / 2);}
         let data =  unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut u32, fats_bytes / 4) };
-        let _ = self.driver.read(self.start_sector_index, fats_sectors, data);
+        let _ = driver.read(self.start_sector_index, fats_sectors, data);
         serial_println!("fat_start_sectors = {}, fats_sectors = {}", self.start_sector_index, fats_sectors);
     }
 
     /// write all FATs to disk
-    pub fn flush(&self) {
+    pub fn flush(&self, driver : &Rc<dyn DiskDriver>) {
         let fats_sectors = self.fat_count * self.sectors_per_fat;
         let fats_bytes = fats_sectors * self.bytes_per_sector ;
         let data =  unsafe { slice::from_raw_parts_mut(self.data.as_ptr() as *mut u32, fats_bytes / 4) };
-        let _ = self.driver.write(self.start_sector_index, fats_sectors, data);
+        let _ = driver.write(self.start_sector_index, fats_sectors, data);
     }
 
     /// 获取以index为起点的所有簇
@@ -335,9 +344,9 @@ impl FAT16SuperBlock {
     pub fn new(driver : Rc<dyn DiskDriver>, sector0 : Rc<Fat16BootSector>) -> FAT16SuperBlock {
         let cluster0_sector_index =  sector0.reserved_sectors as usize; 
         let clusters_count = sector0.get_totel_sectors() / (sector0.sectors_per_cluster as usize);
-        let root = Rc::new(FAT16Directory::ReadRoot(driver.clone(), &sector0));
-        let mut fats = FAT16Fats::new(driver.clone(), &sector0);
-        fats.init();
+        let root = Rc::new(FAT16SuperBlock::ReadRoot(&driver, &sector0));
+        let mut fats = FAT16Fats::new(&driver, &sector0);
+        fats.init(&driver);
         let fats = Rc::new(fats);
 
         FAT16SuperBlock {
@@ -349,11 +358,42 @@ impl FAT16SuperBlock {
             root,
         }
     }
+
+    ///读取根目录数据
+    pub fn ReadRoot(driver : &Rc<dyn DiskDriver>, boot_sector : &Fat16BootSector) -> FAT16Directory {
+        let root_sectors = (boot_sector.root_entries * 32 / boot_sector.bytes_per_sector) as usize;
+        let root_bytes = root_sectors * boot_sector.bytes_per_sector as usize;
+
+        let mut data: Vec<u8> = Vec::with_capacity(root_bytes);
+        unsafe{data.set_len(root_bytes);}
+
+        let mut root_buffer  : Vec<Fat16DirectoryItem> = Vec::with_capacity(boot_sector.root_entries as usize);
+        unsafe{root_buffer.set_len(boot_sector.root_entries as usize);}
+        let temp: &mut [u32] =  unsafe { slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u32, root_bytes / 4) };
+        let root_start_sectors = boot_sector.reserved_sectors  as u64 + boot_sector.fats as u64 * boot_sector.sectors_per_fat as u64;
+        let _ = driver.read(root_start_sectors, root_sectors, temp);
+        serial_println!("root_start_sectors = {}, root_sectors = {}", root_start_sectors, root_sectors);
+        // for i in 0..128 {
+        //     serial_print!("{:08x} ",data[i]);
+        // }
+        // serial_print!("");
+        serial_println!("root_buffer.len() = {}", root_buffer.len());
+        let mut root_item = Fat16DirectoryItem::root();
+
+        FAT16Directory {
+            children_data : Rc::new(data), 
+            bytes : root_bytes, 
+            parent : None, 
+            data : root_item,
+            clusters_index: Vec::new(),
+        }
+    }
+
 }
 
 impl SuperBlock for FAT16SuperBlock {
     fn write(&self) {
-        self.fats.flush();
+        self.fats.flush(&self.driver);
         // self.root.flush();
     }
 
@@ -399,7 +439,7 @@ impl IndexNode for FAT16IndexNode {
         u8_11_to_string(&self.get_item().name)
     }
 
-    fn set_name(&self, name : &str) {
+    fn set_name(&self, name : &str, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
 
@@ -407,12 +447,12 @@ impl IndexNode for FAT16IndexNode {
         self.get_item().attributes.bits as u64
     }
 
-    fn set_attribute(&mut self, value : u64) {
+    fn set_attribute(&mut self, value : u64, super_block : &Rc<dyn SuperBlock>) {
         self.get_item().attributes.bits = value as u8;
     }
 
     ///这个是有Bug的,复制出来的是备份,无法完成时间设置的
-    fn set_write_datetime(&self, value : DateTime) {
+    fn set_write_datetime(&self, value : DateTime, super_block : &Rc<dyn SuperBlock>) {
         let mut item = self.get_item();
         item.write_date = value.0.to_u16();
         item.write_time = value.1.to_u16();
@@ -425,7 +465,6 @@ impl IndexNode for FAT16IndexNode {
 }
 #[derive(Clone)]
 pub struct FAT16Directory {
-    driver : Rc<dyn DiskDriver>,
     ///数据
     children_data : Rc<Vec<u8>>,
     // 字节数
@@ -439,41 +478,6 @@ pub struct FAT16Directory {
 }
 
 impl FAT16Directory {
-    fn new() -> FAT16Directory {
-        todo!()
-    }
-
-    ///读取根目录数据
-    pub fn ReadRoot(driver : Rc<dyn DiskDriver>, boot_sector : &Fat16BootSector) -> FAT16Directory {
-        let root_sectors = (boot_sector.root_entries * 32 / boot_sector.bytes_per_sector) as usize;
-        let root_bytes = root_sectors * boot_sector.bytes_per_sector as usize;
-
-        let mut data: Vec<u8> = Vec::with_capacity(root_bytes);
-        unsafe{data.set_len(root_bytes);}
-
-        let mut root_buffer  : Vec<Fat16DirectoryItem> = Vec::with_capacity(boot_sector.root_entries as usize);
-        unsafe{root_buffer.set_len(boot_sector.root_entries as usize);}
-        let temp: &mut [u32] =  unsafe { slice::from_raw_parts_mut(data.as_mut_ptr() as *mut u32, root_bytes / 4) };
-        let root_start_sectors = boot_sector.reserved_sectors  as u64 + boot_sector.fats as u64 * boot_sector.sectors_per_fat as u64;
-        let _ = driver.read(root_start_sectors, root_sectors, temp);
-        serial_println!("root_start_sectors = {}, root_sectors = {}", root_start_sectors, root_sectors);
-        // for i in 0..128 {
-        //     serial_print!("{:08x} ",data[i]);
-        // }
-        // serial_print!("");
-        serial_println!("root_buffer.len() = {}", root_buffer.len());
-        let mut root_item = Fat16DirectoryItem::root();
-
-        FAT16Directory {
-            driver, 
-            children_data : Rc::new(data), 
-            bytes : root_bytes, 
-            parent : None, 
-            data : root_item,
-            clusters_index: Vec::new(),
-        }
-    }
-
     pub fn get_parent(&self) -> Option<Rc<FAT16Directory>> {
         self.parent.clone()
     }
@@ -528,10 +532,10 @@ impl FAT16Directory {
         ret
     }
 
-    pub fn open_file(&self, driver : Rc<dyn DiskDriver>, super_block : Rc<FAT16SuperBlock>, indexNode : Rc<FAT16IndexNode>) -> Result<Rc<FAT16File>,&'static str> {
-        let item = self.get_child_item(indexNode.index);
+    pub fn open_file(&self, super_block : &Rc<FAT16SuperBlock>, index_node : Rc<FAT16IndexNode>) -> Result<Rc<FAT16File>,&'static str> {
+        let item = self.get_child_item(index_node.index);
         let all_clusters = super_block.fats.get_all_clusters(item.cluster_index);
-        let ret = Rc::new(FAT16File::new(driver.clone(), Rc::new(self.clone()), indexNode,RefCell::new(all_clusters)));
+        let ret = Rc::new(FAT16File::new(Rc::new(self.clone()), index_node,RefCell::new(all_clusters)));
         Ok(ret)
     }
 }
@@ -554,26 +558,26 @@ impl Directory for FAT16Directory {
     }
 
     /// open the file
-    fn open_file(&self, node : Rc<dyn IndexNode>) -> Rc<dyn File> {
+    fn open_file(&self, node : Rc<dyn IndexNode>, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn File> {
         todo!()
     }
 
     /// get the sub directory
-    fn load_directory(&self, node : Rc<dyn IndexNode>) -> Rc<dyn Directory> {
+    fn load_directory(&self, node : Rc<dyn IndexNode>, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn Directory> {
         todo!()
     }
 
-    fn create_directory(&self) -> Rc<dyn Directory> {
+    fn create_directory(&self, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn Directory> {
         todo!()
     }
 
-    fn delete_directory(&self) {
+    fn delete_directory(&self, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
 }
 
 pub struct FAT16File  {
-    pub driver : Rc<dyn DiskDriver>,
+    // pub driver : Rc<dyn DiskDriver>,
     pub path : Rc<FAT16Directory>,
     pub node : Rc<FAT16IndexNode>,
     pub indexes : RefCell<Vec<u16>>,
@@ -581,20 +585,18 @@ pub struct FAT16File  {
 }
 
 impl FAT16File {
-    pub fn new(driver : Rc<dyn DiskDriver>,path : Rc<FAT16Directory>, node : Rc<FAT16IndexNode>, indexes : RefCell<Vec<u16>>) -> FAT16File {
-        FAT16File { driver, path, node, indexes, pos: 0 }
+    pub fn new(path : Rc<FAT16Directory>, node : Rc<FAT16IndexNode>, indexes : RefCell<Vec<u16>>) -> FAT16File {
+        FAT16File { path, node, indexes, pos: 0 }
     }
 
-    pub fn read_all_bytes(&self) -> Box<Vec<u8>> {
+    pub fn read_all_bytes(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<Vec<u8>> {
         let item = self.path.get_child_item(self.node.index);
         let size = item.file_size as usize;
-        // let mut ret : Vec<u8> = Vec::new();
         let mut ret : Vec<u8> = Vec::with_capacity(size);
         unsafe{ret.set_len(size);}
         let mut data : [u32;SECTOR_SIZE*4] = [0;SECTOR_SIZE*4];
-        // 1个保留扇区,2*200个FAT扇区,32个根目录扇区；1、2簇号保留
-        // 所以 (簇号-2)*4 + 433 即 簇号 * 4 + 425
-        self.driver.read((item.cluster_index as u64) * 4 + 425, 4, &mut data);
+        let sector_index = super_block.sector0.get_sector_index(item.cluster_index as usize) as u64;
+        let _ = super_block.driver.read(sector_index, super_block.sector0.sectors_per_cluster as usize, &mut data);
         let data = unsafe {*(data.as_mut_ptr() as *mut [u8;512*4])};
         for i in 0..size {
             ret[i] = data[i];
@@ -612,7 +614,7 @@ impl File for FAT16File {
         todo!()
     }
 
-    fn get_mode(&self) {
+    fn get_mode(&self) -> FileOpenMode {
         todo!()
     }
 
@@ -620,11 +622,11 @@ impl File for FAT16File {
         todo!()
     }
 
-    fn set_position(&self) {
+    fn set_position(&mut self) {
         todo!()
     }
 
-    fn read(&self) {
+    fn read(&self, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
     // pub fn read(&self, buffer : *mut u8, size :usize) -> usize {
@@ -637,15 +639,15 @@ impl File for FAT16File {
     //     0
     // }
 
-    fn write(&self) {
+    fn write(&self, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
 
-    fn flush(&self) {
+    fn flush(&self, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
 
-    fn close(&self) {
+    fn close(&self, super_block : &Rc<dyn SuperBlock>) {
         todo!()
     }
 }

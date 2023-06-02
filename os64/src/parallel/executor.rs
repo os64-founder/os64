@@ -1,8 +1,9 @@
 extern crate alloc;
-use super::{Task, TaskId};
 use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
 use core::task::{Context, Poll, Waker};
 use crossbeam_queue::ArrayQueue;
+
+use super::task::{Task, TaskId};
 
 pub struct Executor {
     tasks: BTreeMap<TaskId, Task>,
@@ -47,7 +48,7 @@ impl Executor {
                 Some(task) => task,
                 None => continue, // task no longer exists
             };
-            let waker = waker_cache
+            let waker: &mut Waker = waker_cache
                 .entry(task_id)
                 .or_insert_with(|| TaskWaker::new(task_id, task_queue.clone()));
             let mut context = Context::from_waker(waker);

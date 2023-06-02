@@ -18,6 +18,8 @@
 
 extern crate alloc;
 
+use core::arch::asm;
+
 // use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 // use os64::parallel::{executor::Executor, Task, keyboard};
 use bootloader::{BootInfo, entry_point, bootinfo};
@@ -101,6 +103,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     devices_init();
 
     vga_test();
+
+    unsafe{ 
+        asm!("syscall");
+    }
 
     // task_test();
     // print_l4_table(boot_info);

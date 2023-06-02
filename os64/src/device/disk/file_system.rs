@@ -1,8 +1,8 @@
 // 本文试图抽象一个文件系统类
-
 use alloc::{boxed::Box, rc::Rc, vec::Vec, string::String};
-
 use super::disk::DiskDriver;
+use bitfield::size_of;
+use bitflags::bitflags;
 
 /// 0  空              24  NEC DOS         81  Minix / 旧 Linu bf  Solaris        
 /// 1  FAT12           27  Hidden NTFS Win 82  Linux 交换 / So c1  DRDOS/sec (FAT-
@@ -80,6 +80,22 @@ impl From<u16> for Time {
     }
 }
 
+
+bitflags! {
+    pub struct FileOpenMode : u8 {
+        //打开已存在的文件
+        const   OPEN    = 0x01;
+        //创建新的文件
+        const   CREATE  = 0x02;
+        //以只读方式打开文件（文件指针在文件头）
+        const   READ    = 0x04;
+        //以写入方式打开文件（如文件已存在，首先会清空文件，文件指针在文件头）
+        const   WRITE   = 0x08;
+        //以追加方式打开文件（无论文件是否存在，文件指针在文件尾）
+        const   APPEND  = 0x04;
+    }
+}
+
 // 以下是文件系统需要实现的部分：
 
 pub trait SuperBlock {
@@ -92,12 +108,12 @@ pub trait IndexNode {
     fn get_size(&self) -> usize;
 
     fn get_name(&self) -> String;
-    fn set_name(&self, name : &str);
+    fn set_name(&self, name : &str, super_block : &Rc<dyn SuperBlock>);
 
     fn get_attribute(&self) -> u64;
-    fn set_attribute(&mut self, value : u64);
+    fn set_attribute(&mut self, value : u64, super_block : &Rc<dyn SuperBlock>);
     
-    fn set_write_datetime(&self, value : DateTime);
+    fn set_write_datetime(&self, value : DateTime, super_block : &Rc<dyn SuperBlock>);
     fn get_write_datetime(&self) -> DateTime;
 }
 
@@ -111,39 +127,39 @@ pub trait Directory {
     /// get files
 	fn get_files(&self) -> Vec<Rc<dyn IndexNode>>;
 
-    /// get files
+    /// get directories
 	fn get_directories(&self) -> Vec<Rc<dyn IndexNode>>;
 
     /// open the file
-    fn open_file(&self, node : Rc<dyn IndexNode>) -> Rc<dyn File>;
+    fn open_file(&self, node : Rc<dyn IndexNode>, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn File>;
 
     /// get the sub directory
-    fn load_directory(&self, node : Rc<dyn IndexNode>) -> Rc<dyn Directory>;
+    fn load_directory(&self, node : Rc<dyn IndexNode>, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn Directory>;
 
     /// create directory
-    fn create_directory(&self) -> Rc<dyn Directory>;
+    fn create_directory(&self, super_block : &Rc<dyn SuperBlock>) -> Rc<dyn Directory>;
 
     /// delete directory
-    fn delete_directory(&self);
+    fn delete_directory(&self, super_block : &Rc<dyn SuperBlock>);
 }
 
 ///已经打开或创建的文件
 pub trait File {
     fn get_node(&self) -> Rc<dyn IndexNode>;
 
-    fn get_mode(&self);
+    fn get_mode(&self) -> FileOpenMode;
 
     fn get_position(&self);
-    fn set_position(&self);
+    fn set_position(&mut self);
 
-    fn read(&self);
-    fn write(&self);
+    fn read(&self, super_block : &Rc<dyn SuperBlock>);
+    fn write(&self, super_block : &Rc<dyn SuperBlock>);
 
-    fn flush(&self);
-    fn close(&self);
+    fn flush(&self, super_block : &Rc<dyn SuperBlock>);
+    fn close(&self, super_block : &Rc<dyn SuperBlock>);
 }
 
-pub trait FileSystem {    
+pub trait FileSystem {
     fn super_block(driver : Rc<dyn DiskDriver>) -> Rc<dyn SuperBlock>;
 }
 

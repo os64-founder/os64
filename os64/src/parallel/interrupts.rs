@@ -37,6 +37,7 @@ lazy_static! {
         idt[InterruptIndex::Serial1.as_usize()].set_handler_fn(serial1_interrupt_handler);
         idt[InterruptIndex::IDE0.as_usize()].set_handler_fn(ide0_interrupt_handler);
         idt[InterruptIndex::IDE1.as_usize()].set_handler_fn(ide1_interrupt_handler);
+        idt[InterruptIndex::SystemCall.as_usize()].set_handler_fn(system_call_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         mouse::init(on_mouse_action);
         idt
@@ -71,6 +72,7 @@ pub enum InterruptIndex {
     Mouse = PIC_1_OFFSET + 12,
     IDE0 = PIC_1_OFFSET + 14,
     IDE1 = PIC_1_OFFSET + 15, 
+    SystemCall = 0x80, 
 }
 
 impl InterruptIndex {
@@ -187,3 +189,12 @@ extern "x86-interrupt" fn serial1_interrupt_handler(_stack_frame: InterruptStack
             .notify_end_of_interrupt(InterruptIndex::Serial1.as_u8());
     }
 }
+
+extern "x86-interrupt" fn system_call_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    serial_print!("---system_call---");
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Serial1.as_u8());
+    }
+}
+
