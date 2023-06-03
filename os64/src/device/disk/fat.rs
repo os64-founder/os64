@@ -27,7 +27,7 @@
 use core::{slice, cell::RefCell, borrow::{Borrow, BorrowMut}};
 use bitfield::size_of;
 use bitflags::bitflags;
-use alloc::{boxed::Box, rc::{Rc, Weak}, vec::Vec, string::String};
+use alloc::{boxed::Box, rc::{Rc, Weak}, vec::Vec, string::{String, ToString}};
 use crate::{serial_println, serial_print};
 use super::{disk::{DiskDriver, SECTOR_SIZE, SECTOR_BYTES}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode}};
 
@@ -586,11 +586,16 @@ pub struct FAT16File  {
     pub node : Rc<FAT16IndexNode>,
     pub indexes : RefCell<Vec<u16>>,
     pub pos : usize,
+    pub mode : FileOpenMode,
 }
 
 impl FAT16File {
     pub fn new(path : Rc<FAT16Directory>, node : Rc<FAT16IndexNode>, indexes : RefCell<Vec<u16>>) -> FAT16File {
-        FAT16File { path, node, indexes, pos: 0 }
+        FAT16File { path, node, indexes, pos: 0, mode: FileOpenMode::empty() }
+    }
+
+    pub fn read_all_text(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<String> {
+        Box::new(String::from_utf8_lossy(&self.read_all_bytes(&super_block)).to_string())
     }
 
     pub fn read_all_bytes(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<Vec<u8>> {
@@ -609,22 +614,19 @@ impl FAT16File {
         }
         Box::new(ret)
     }
-
-    pub fn get_index_node() {
-    }
 }
 
 impl File for FAT16File {
     fn get_node(&self) -> Rc<dyn IndexNode> {
-        todo!()
+        self.node.clone()
     }
 
     fn get_mode(&self) -> FileOpenMode {
-        todo!()
+        self.mode
     }
 
-    fn get_position(&self) {
-        todo!()
+    fn get_position(&self) -> usize {
+        self.pos
     }
 
     fn set_position(&mut self) {

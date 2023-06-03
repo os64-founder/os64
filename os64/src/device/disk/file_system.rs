@@ -149,7 +149,7 @@ pub trait File {
 
     fn get_mode(&self) -> FileOpenMode;
 
-    fn get_position(&self);
+    fn get_position(&self) -> usize;
     fn set_position(&mut self);
 
     fn read(&self, super_block : &Rc<dyn SuperBlock>);

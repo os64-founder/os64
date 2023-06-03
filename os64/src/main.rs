@@ -15,16 +15,13 @@
 #![test_runner(os64::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-
 extern crate alloc;
-
-use core::arch::asm;
 
 // use alloc::{boxed::Box, vec, vec::Vec, rc::Rc};
 // use os64::parallel::{executor::Executor, Task, keyboard};
 use bootloader::{BootInfo, entry_point, bootinfo};
-use x86_64::{VirtAddr, structures::paging::{Translate, Page}};
-use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, devices_init}, memory::{self, BootInfoFrameAllocator, active_level_4_table, translate_addr}, parallel::{mouse::{self}, process::Process}};
+use x86_64::VirtAddr;
+use os64::{device::{serial::_print, graphics::{GraphicsDriver, drawing::{canvas::{ScreenCanvas, Canvas}, windows::{widget_base::{add_child, Widget}, win31_style::{create_cursor_widget, create_window, BorderKind, create_desktop}}, colors}, vga::modes::{Graphics640x480x16, ALLCOLOR4COLOR}, Rect, Point, Size}, devices_init}, memory::{self, BootInfoFrameAllocator}, parallel::{mouse::{self}, process::Process}};
 
 #[cfg(test)]
 fn test_runner(tests: &[&dyn Fn()]) {
@@ -76,35 +73,22 @@ entry_point!(kernel_main);
 //#[no_mangle]
 //pub extern "C" fn kernel_main(boot_info: &'static BootInfo) -> ! {
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
-    serial_println!("os64 start ...");
-    // serial_println!("Hello World !");
+    serial_println!("OS64 start ...");
 
-    os64::init(); // new
-
-    // mouse::mouse_init();
-    // let result = mouse::init(on_mouse_action);
-    // match result {
-    //     Ok(_) => serial_println!("mouse::init OK "),
-    //     Err(msg) => serial_println!("mouse::init Error : {} ", msg),
-    // }
+    os64::init();
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    let mut frame_allocator = unsafe {
-        BootInfoFrameAllocator::init(&boot_info.memory_map)
-    };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_map) };
 
-    // new
     os64::memory::allocator::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
 
     os64::device::clock::real_time_clock::get_datetime();
-
     devices_init();
-
     vga_test();
 
-    let process = Process::Read("test");
+    let process = Process::read("test");
 
     // unsafe{ 
     //     asm!("int 0x80");

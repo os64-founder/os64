@@ -5,4 +5,5 @@ pub mod interrupts;
 pub mod keyboard;
 pub mod mouse;
 pub mod ring_buffer;
+pub mod modules;
 pub mod process;

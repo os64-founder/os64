@@ -456,7 +456,8 @@ pub fn init_disks() -> Box<Vec<Box<Disk>>> {
         if result.borrow().len() > 0 {
             let result = super_block.root.open_file(&super_block,result.borrow()[0].clone());
             let file = result.expect("can not open file");
-            file.read_all_bytes(&super_block);
+            let text = file.read_all_text(&super_block);
+            serial_println!("{}",text);
         }
     } else { //FAT32
         let boot_sector: Fat32BootSector = unsafe {*(data.as_mut_ptr() as *mut Fat32BootSector)};
