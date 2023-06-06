@@ -88,7 +88,7 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     devices_init();
     vga_test();
 
-    let process = Process::read("test");
+    let process = Process::read("test",boot_info.physical_memory_offset);
 
     // unsafe{ 
     //     asm!("int 0x80");

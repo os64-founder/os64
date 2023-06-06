@@ -1,3 +1,5 @@
+use core::cell::RefCell;
+
 // 本文试图抽象一个文件系统类
 use alloc::{boxed::Box, rc::Rc, vec::Vec, string::String};
 use super::disk::DiskDriver;
@@ -96,6 +98,13 @@ bitflags! {
     }
 }
 
+#[derive(Clone,Copy,Debug)]
+pub enum FilePosition {
+    Start(usize),
+    End(isize),
+    Current(isize),
+}
+
 // 以下是文件系统需要实现的部分：
 
 pub trait SuperBlock {
@@ -150,13 +159,13 @@ pub trait File {
     fn get_mode(&self) -> FileOpenMode;
 
     fn get_position(&self) -> usize;
-    fn set_position(&mut self);
+    fn set_position(&mut self, pos : FilePosition);
 
-    fn read(&self, super_block : &Rc<dyn SuperBlock>);
-    fn write(&self, super_block : &Rc<dyn SuperBlock>);
+    fn read(&self, super_block : &Rc<dyn SuperBlock>, len : usize) -> RefCell<Vec<u8>>;
+    fn write(&self, super_block : &Rc<dyn SuperBlock>, data : &[u8]) -> Result<usize, &str>;
 
-    fn flush(&self, super_block : &Rc<dyn SuperBlock>);
-    fn close(&self, super_block : &Rc<dyn SuperBlock>);
+    fn flush(&self, super_block : &Rc<dyn SuperBlock>) -> Result<(), &str>;
+    fn close(&self, super_block : &Rc<dyn SuperBlock>) -> Result<(), &str>;
 }
 
 pub trait FileSystem {

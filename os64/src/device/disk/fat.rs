@@ -29,7 +29,7 @@ use bitfield::size_of;
 use bitflags::bitflags;
 use alloc::{boxed::Box, rc::{Rc, Weak}, vec::Vec, string::{String, ToString}};
 use crate::{serial_println, serial_print};
-use super::{disk::{DiskDriver, SECTOR_SIZE, SECTOR_BYTES}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode}};
+use super::{disk::{DiskDriver, SECTOR_SIZE, SECTOR_BYTES}, file_system::{Time, Date, FileSystem, SuperBlock, IndexNode, Directory, File, DateTime, FileOpenMode, FilePosition}};
 
 bitflags! { 
     ///目录项属性
@@ -594,11 +594,11 @@ impl FAT16File {
         FAT16File { path, node, indexes, pos: 0, mode: FileOpenMode::empty() }
     }
 
-    pub fn read_all_text(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<String> {
-        Box::new(String::from_utf8_lossy(&self.read_all_bytes(&super_block)).to_string())
+    pub fn read_all_text(&self, super_block : &Rc<FAT16SuperBlock>) -> Rc<String> {
+        Rc::new(String::from_utf8_lossy(&self.read_all_bytes(&super_block)).to_string())
     }
 
-    pub fn read_all_bytes(&self, super_block : &Rc<FAT16SuperBlock>) -> Box<Vec<u8>> {
+    pub fn read_all_bytes(&self, super_block : &Rc<FAT16SuperBlock>) -> Vec<u8> {
         let item = self.path.get_child_item(self.node.index);
         let all_clusters_index = super_block.fats.get_all_clusters(item.cluster_index);
         let bytes_per_cluster = super_block.sector0.get_bytes_per_cluster();
@@ -612,7 +612,7 @@ impl FAT16File {
             let data = unsafe { slice::from_raw_parts_mut(ptr.add(i * bytes_per_cluster) as *mut u32, bytes_per_cluster / size_of::<u32>()) };
             let _ = super_block.driver.read(sector_index, super_block.sector0.sectors_per_cluster as usize, data);
         }
-        Box::new(ret)
+        ret
     }
 }
 
@@ -629,33 +629,45 @@ impl File for FAT16File {
         self.pos
     }
 
-    fn set_position(&mut self) {
-        todo!()
+    fn set_position(&mut self, pos : FilePosition) {
+        self.pos = match pos {
+            FilePosition::Start(o) => o ,
+            FilePosition::End(o) => ( self.node.get_size() as isize + o ) as usize,
+            FilePosition::Current(o) => ( self.pos as isize + o ) as usize,
+        }
     }
 
-    fn read(&self, super_block : &Rc<dyn SuperBlock>) {
-        todo!()
-    }
-    // pub fn read(&self, buffer : *mut u8, size :usize) -> usize {
-    //     let item = self.path.get_child_item(self.node.index);
-    //     let mut size = size;
-    //     if size + self.pos > item.file_size as usize {
-    //         size = item.file_size as usize - self.pos;
-    //     }        
-    //     // serial_println!("FAT16File::read()");
-    //     0
-    // }
-
-    fn write(&self, super_block : &Rc<dyn SuperBlock>) {
-        todo!()
+    fn read(&self, super_block : &Rc<dyn SuperBlock>, len : usize) -> RefCell<Vec<u8>> {
+        let mut len = len;
+        if len > self.node.get_size() - self.pos {
+            len = self.node.get_size() - self.pos;
+        }
+        let mut ret = RefCell::new(Vec::new());
+        ret.borrow_mut().resize(len, 0);
+        // super_block.get_disk.read();
+        // self.pos += len;
+        ret
     }
 
-    fn flush(&self, super_block : &Rc<dyn SuperBlock>) {
-        todo!()
+    fn write(&self, super_block : &Rc<dyn SuperBlock>, data : &[u8]) -> Result<usize, &str> {
+        // let mut len = len;
+        // if len > self.node.get_size() - self.pos {
+        //     len = self.node.get_size() - self.pos;
+        // }
+        // let mut ret = RefCell::new(Vec::new());
+        // ret.borrow_mut().resize(len, 0);
+        // // super_block.get_disk.read();
+        // ret
+        // self.pos += len;
+        Ok(0)
     }
 
-    fn close(&self, super_block : &Rc<dyn SuperBlock>) {
-        todo!()
+    fn flush(&self, super_block : &Rc<dyn SuperBlock>) -> Result<(), &str> {
+        Ok(())
+    }
+
+    fn close(&self, super_block : &Rc<dyn SuperBlock>) -> Result<(), &str> {
+        Ok(())
     }
 }
 
