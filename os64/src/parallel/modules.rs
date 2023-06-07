@@ -1,10 +1,7 @@
-use bitfield::size_of;
-use lazy_static::lazy_static;
-use x86_64::{structures::paging::PageTable, VirtAddr, PhysAddr};
-use core::{fmt, borrow::BorrowMut};
-use alloc::{string::{String, ToString}, collections::BTreeMap, vec::Vec, rc::Rc, slice};
-use xmas_elf::{ElfFile, sections::ShType, program::Type};
-use crate::{serial_println, device::disk::{ide::IDE_DISKS, disk::SECTOR_SIZE, disk::DiskDriver, fat::{Fat16BootSector, FAT16SuperBlock, Attributes}}, serial_print, memory::translate_addr};
+use x86_64::{structures::paging::{PageTable, PageTableIndex, PageTableFlags}, VirtAddr, PhysAddr};
+use core::fmt;
+use alloc::{string::{String, ToString}, collections::BTreeMap, boxed::Box};
+use crate::{serial_println, memory::translate_addr};
 
 // enum PT
 // {
@@ -163,6 +160,13 @@ impl fmt::Display for SymbolSection {
     }
 }
 
+/// 512G - 2M
+pub const DEFAULT_STACK_ADDRESS : usize = 0o000_777_777_000_0000;
+/// 64K
+pub const DEFAULT_STACK_SIZE : usize = 0o000_000_000_020_0000;
+/// 4K
+pub const DEFAULT_PAGE_SIZE : usize = 0o000_000_000_001_0000;
+
 /// A item in section .symtab
 /// 符号表项,即 .symtab 中的项
 #[repr(packed)]
@@ -264,62 +268,89 @@ impl PageKey {
         }
     }
 
+    pub fn get_sub_key(&self, virtual_address : usize) -> Option<PageKey> {
+        if self.level() == 0 {
+            None
+        } else {
+            Some(PageKey::from_virtual_address(self.level() - 1, virtual_address))
+        }
+    }
+
     pub fn level(&self) -> u8 {
         (self.value >> 60) as u8 & 0x07
     }
 
-    pub fn l4_index(&self) -> u16 {
-        (self.value >> 39) as u16 & 0x1FF
+    pub fn index(&self) -> u16 {
+        let bits = 12 + 9 * self.level();
+        (self.value >> bits) as u16 & 0x1FF
+    }
+ 
+    pub fn l4_index(&self) -> PageTableIndex {
+        PageTableIndex::new((self.value >> 39) as u16 & 0x1FF)
     }
 
-    pub fn l3_index(&self) -> u16 {
-        (self.value >> 30) as u16 & 0x1FF
+    pub fn l3_index(&self) -> PageTableIndex {
+        PageTableIndex::new((self.value >> 30) as u16 & 0x1FF)
     }
 
-    pub fn l2_index(&self) -> u16 {
-        (self.value >> 21) as u16 & 0x1FF
+    pub fn l2_index(&self) -> PageTableIndex {
+        PageTableIndex::new((self.value >> 21) as u16 & 0x1FF)
     }
 
-    pub fn l1_index(&self) -> u16 {
-        (self.value >> 12) as u16 & 0x1FF
+    pub fn l1_index(&self) -> PageTableIndex {
+        PageTableIndex::new((self.value >> 12) as u16 & 0x1FF)
     }
 }
 
 
 ///页信息
-#[repr(C)]
 pub struct Page {
     ///数据: 页表 或 4K内存
-    pub data : Rc<PageTable>,
-    
-    ///页物理地址
-    pub physical_address: PhysAddr,
-
-    ///    
+    pub data : Box<PageTable>,
     pub key: PageKey,
+    pub sub_pages : BTreeMap<u16,Box<Page>>,//[Option<Rc<Page>>;512],//
 }
 
 impl Page {
-    fn new(key: &PageKey, physical_memory_offset: u64) -> Page {
-        let mut data = Rc::new(PageTable::new());
-        let address = Rc::as_ptr(data.borrow_mut()) as u64;
-        //这个 VirtAddr 是 init 进程中的
-        let addr = VirtAddr::new(address);
-
-        let physical_address = unsafe { translate_addr(addr,VirtAddr::new(physical_memory_offset)).expect("translate_addr error") };
+    fn new(key: &PageKey) -> Page {
         Page {
-            data,
-            physical_address,
+            data: Box::new(PageTable::new()),
             key: *key,
+            sub_pages: BTreeMap::new(),
         }
     }
 
-    pub fn page_table(&mut self) -> &mut Rc<PageTable> {
+    pub fn page_table(&mut self) -> &mut Box<PageTable> {
         &mut self.data
     }
 
     pub fn get_data(&mut self) -> *mut [u8;4096] {
-        Rc::as_ptr(&mut self.data) as usize as * mut[u8;4096]
+        self.data.as_ref() as *const PageTable as usize as * mut[u8;4096]
+    }
+
+    pub fn physical_address(&self, physical_memory_offset: u64) -> PhysAddr {
+        let address = self.data.as_ref() as *const PageTable as u64;
+        //这个 VirtAddr 是 init 进程中的
+        let addr = VirtAddr::new(address);
+        unsafe { translate_addr(addr,VirtAddr::new(physical_memory_offset)).expect("translate_addr error") }
+    }
+
+    pub fn sub_page(&mut self,virtual_address: usize,physical_memory_offset: u64) -> Option<&mut Box<Page>> {
+        let key = self.key.get_sub_key(virtual_address);
+        match key {
+            None => None,
+            Some(key) => {
+                let index = key.index();
+                if !self.sub_pages.contains_key(&index) {
+                    let page = Box::new(Page::new(&key));
+                    let phys_addr = page.physical_address(physical_memory_offset);
+                    serial_println!("key = {:?}, page address = 0x{:016x}", key, phys_addr.as_u64());
+                    self.data[PageTableIndex::new(index)].set_addr(phys_addr, PageTableFlags::empty());
+                    self.sub_pages.insert(index, page);
+                }
+                self.sub_pages.get_mut(&index)
+            },
+        }
     }
 }
 
@@ -343,206 +374,26 @@ impl ModuleInfo {
 ///已加载模块
 pub struct ModuleLoadedInfo {
     pub info: ModuleInfo,
-    pub pages: BTreeMap<PageKey,Page>,
+    pub level4 : Page,
     pub symbols : BTreeMap<String,ModuleSymbol>,
     use_count : usize,
 }
 
 impl ModuleLoadedInfo {
     pub fn new(info : ModuleInfo) -> ModuleLoadedInfo {
+        let l4_key = PageKey::from_virtual_address(4, 0);
         ModuleLoadedInfo {
             info,
-            pages: BTreeMap::new(),
+            level4: Page::new(&l4_key),
             symbols: BTreeMap::new(),
             use_count: 0,
         }
     }
 
-    pub fn page(&mut self, key: &PageKey, physical_memory_offset: u64) -> &mut Page {
-        if !self.pages.contains_key(key) {
-            let page = Page::new(key,physical_memory_offset);
-            self.pages.insert(*key,page);
-        }
-        self.pages.get_mut(key).unwrap()
+    pub fn page_by_address(&mut self, virtual_address: usize, physical_memory_offset: u64) -> &mut Box<Page> {
+        let l3 = self.level4.sub_page(virtual_address, physical_memory_offset).unwrap();
+        let l2 = l3.sub_page(virtual_address, physical_memory_offset).unwrap();
+        let l1 = l2.sub_page(virtual_address, physical_memory_offset).unwrap();
+        l1.sub_page(virtual_address, physical_memory_offset).unwrap()
     }
-
-    pub fn page_by_address(&mut self, virtual_address: usize, physical_memory_offset: u64)  -> &mut Page {
-        let l4_key = PageKey::from_virtual_address(4, virtual_address);
-        let _ = self.page(&l4_key, physical_memory_offset);
-
-        let l3_key = PageKey::from_virtual_address(3, virtual_address);
-        let _ = self.page(&l3_key,physical_memory_offset);
-        
-        let l2_key = PageKey::from_virtual_address(2, virtual_address);
-        let _ = self.page(&l2_key,physical_memory_offset);                                    
-
-        let l1_key = PageKey::from_virtual_address(1, virtual_address);
-        let _ = self.page(&l1_key,physical_memory_offset);
-
-        let l0_key = PageKey::from_virtual_address(0, virtual_address);
-        self.page(&l0_key,physical_memory_offset)
-    }
-}
-
-// pub static ALLMODULES : BTreeMap<String,ModuleLoadedInfo> = BTreeMap::new();
-
-impl  ModuleLoadedInfo {
-    pub fn read(filename : &str) -> Vec<u8> {
-        let driver = Rc::new(IDE_DISKS[1]);
-        let mut data : [u32;SECTOR_SIZE] = [0;SECTOR_SIZE];
-        //读取启动扇区
-        let _ = driver.read(0, 1, &mut data);
-        let boot_sector = unsafe {*(data.as_mut_ptr() as *mut Fat16BootSector)};
-        let super_block = Rc::new(FAT16SuperBlock::new(driver.clone(), Rc::new(boot_sector)));
-
-        let slice = b"FIRSTAPP   ";
-        let result = super_block.root.find_children(slice, Attributes::empty());
-        serial_println!("found {} app", result.borrow().len());
-
-        let result = super_block.root.open_file(&super_block,result.borrow()[0].clone());
-        let file = result.expect("can not open file");
-        file.read_all_bytes(&super_block)
-    }
-
-    pub fn load(filename : &String,physical_memory_offset :u64) {
-        
-        // if !ALLMODULES.contains_key(&filename) {
-            let mut module = ModuleInfo::new(&filename,0,0);
-            let mut module = ModuleLoadedInfo::new(module);
-            let all_bytes = ModuleLoadedInfo::read(&filename);
-            let elf_file = ElfFile::new(&all_bytes).expect("elf format error");
-            
-            for program_header  in elf_file.program_iter() {
-                match program_header.get_type() {
-                    Ok(t) => {
-                        match t {
-                            Type::Phdr => {
-                                // serial_println!("Phdr: ...");
-                            },
-                            Type::Load => {
-                                // 需要进行加载 文件 offset 开始的 file_size 字节到 虚拟地址 virtual_addr,
-                                // 总字节数 mem_size, 对齐字节数为 align, 页读写跑属性为 flag
-                                let page_4k_count = ((program_header.mem_size() as usize - 1) >> 12) + 1;
-                                // let page_4k_size = page_4k_count << 12;
-
-                                //需要映射到进程的地址
-                                let mut virtual_address = program_header.virtual_addr() as usize;
-                                let mut offset = program_header.offset() as usize;
-                                let mut copy_size = program_header.file_size() as usize;
-                                serial_println!("virtual_address = 0x{:016x}, offset = {}, copy_size = {}", virtual_address, offset, copy_size);
-
-                                for _ in 0..page_4k_count {
-                                    let data = module.page_by_address(virtual_address, physical_memory_offset).get_data();
-                                    //复制内容
-                                    unsafe {
-                                        let size = if copy_size > 4096 { 4096 } else { copy_size };
-                                        for i in 0..size {
-                                            (*data)[i] = all_bytes[offset + i];
-                                        }
-                                        copy_size -= size;
-                                        offset += size;
-                                    }
-                                    virtual_address += 4096;
-                                }
-                            },
-                            Type::OsSpecific(v) => {
-                                serial_println!("OsSpecific: v = 0x{:08x}", v);
-                            },
-                            // Type::Dynamic => {},
-                            // Type::Interp => {},
-                            // Type::Note => {},
-                            // Type::ShLib => {},
-                            // Type::Tls => {},
-                            // Type::GnuRelro => {},
-                            // Type::ProcessorSpecific(_) => {},
-                            _ => {},
-                        }
-                    },
-                    Err(_) => {
-                        serial_println!("Error");
-                    }
-                }
-                // pub type_: Type_,
-                // pub flags: Flags,
-                // pub offset: u64,
-                // pub virtual_addr: u64,
-                // pub physical_addr: u64,
-                // pub file_size: u64,
-                // pub mem_size: u64,
-                // pub align: u64,
-            // }
-        }
-    }
-
-    pub fn print(elf_file : &ElfFile) {
-        serial_println!("header: {:?} ", elf_file.header);
-        for s in elf_file.section_iter() {
-            match s.get_name(&elf_file) {
-                Ok(name) => {
-                    serial_println!("section {}: {:?} ", name, s);
-                    match s.get_type() {
-                        Ok(t) => { 
-                            match t {
-                                ShType::ProgBits => { //代码段：如 .text 和 .comment 以及 .debug_*
-
-                                },
-                                ShType::StrTab => { //字符串表：如 .shstrtab 和 .strtab
-                                    // .shstrtab 用于存储段名
-                                    // .strtab 用于存储函数名
-                                    let data = s.raw_data(elf_file);
-                                    for (i,byte) in data.iter().enumerate() {
-                                        if *byte == 0 {
-                                            serial_println!();
-                                            if i+1 != data.len() {
-                                                serial_print!("{}:\t", i+1);
-                                            }
-                                        } else {
-                                            serial_print!("{}",*byte as char);
-                                        }
-                                    }
-                                },
-                                ShType::SymTab => { //符号表： 如 .symtab
-                                    let sizeof = size_of::<Elf64SymbolItem>();
-                                    let data = s.raw_data(elf_file);
-                                    // for (i,byte) in data.iter().enumerate() {
-                                    //     serial_print!("{:02x}",byte);
-                                    //     if (i + 1)  % 8 == 0 {
-                                    //         serial_print!(" ");
-                                    //         if (i + 1) % sizeof == 0 {
-                                    //             serial_println!();
-                                    //         }
-                                    //     }
-                                    // }
-                                    // serial_println!();
-                                    let items = unsafe { 
-                                        slice::from_raw_parts(
-                                            data.as_ptr() as *const Elf64SymbolItem, 
-                                            data.len() / sizeof,
-                                        ) 
-                                    };
-                                    for item in items {
-                                        // let item = unsafe { *(data.as_mut_ptr() as *mut [Elf64SymbolItem]) };
-                                        serial_println!("{:?}", item);
-                                    }
-                                },
-                                ShType::Null => {
-
-                                },
-                                _ => {},
-                            }
-                        },
-                        Err(e) => {},
-                    }
-                },
-                Err(_) => {
-                    serial_println!("section: {:?}", s);
-                },
-            }
-        }
-
-        for p in elf_file.program_iter() {
-            serial_println!("program: {:?}", p);
-        }
-    }
-
 }

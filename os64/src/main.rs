@@ -75,6 +75,9 @@ entry_point!(kernel_main);
 fn kernel_main(boot_info: &'static BootInfo) -> ! {
     serial_println!("OS64 start ...");
 
+    serial_println!("offset = 0x{:016x}", boot_info.physical_memory_offset);
+    // serial_println!("memory_map = {:?}", boot_info.memory_map);
+
     os64::init();
 
     let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset);
